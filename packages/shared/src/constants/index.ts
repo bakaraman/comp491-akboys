@@ -6,3 +6,4 @@
  */
 
 export { NOIR_SCENARIO } from './scenario';
+export { SCENARIOS } from './scenarios';
