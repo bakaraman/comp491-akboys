@@ -1,0 +1,51 @@
+/**
+ * globals.css — Global styles for the noir text adventure
+ *
+ * Dark theme with amber/gold accents inspired by 1920s noir.
+ *
+ * @author AK Boys Team
+ * @since 2026-03-12
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #141414;
+  --bg-card: #1a1a1a;
+  --text-primary: #e8e0d4;
+  --text-secondary: #9a9080;
+  --accent-gold: #d4a843;
+  --accent-amber: #c8894a;
+  --border-dark: #2a2520;
+  --input-bg: #111111;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+::selection {
+  background: var(--accent-gold);
+  color: var(--bg-primary);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-dark);
+  border-radius: 3px;
+}
