@@ -15,10 +15,12 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
   PlayerData,
+  PlayerAction,
 } from '@akboys/shared';
 import { toPlayerDTO, SCENARIOS } from '@akboys/shared';
 import type { SessionStore } from '../store/SessionStore.js';
 import { nextPlayerColor } from '../store/SessionStore.js';
+import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -41,6 +43,41 @@ function getAllPlayerDTOs(store: SessionStore, sessionId: string) {
 /* ------------------------------------------------------------------ */
 
 export function registerSocketHandlers(io: GameServer, store: SessionStore): void {
+  /* ---- Action batcher: fires when the batch timer expires ---- */
+  const batcher = new ActionBatcher(store, (sessionId, actions) => {
+    const session = store.get(sessionId);
+    if (!session) return;
+
+    // Build a combined user message from all actions
+    const lines = actions.map(
+      (a) => `[${a.playerName} / ${a.roomId}] "${a.message}"`,
+    );
+    const combinedMessage = `[ACTIONS THIS TURN]\n\n${lines.join('\n')}`;
+
+    // Store as a single user message in history
+    store.addMessage(sessionId, {
+      role: 'user',
+      content: combinedMessage,
+      timestamp: Date.now(),
+    });
+
+    // TODO (Phase 5): Replace mock response with real OpenAI streaming
+    const mockResponse = `**[Mock Narrator]** Received ${actions.length} action(s):\n\n${actions.map((a) => `- **${a.playerName}** (${a.roomId}): "${a.message}"`).join('\n')}`;
+
+    store.addMessage(sessionId, {
+      role: 'assistant',
+      content: mockResponse,
+      timestamp: Date.now(),
+    });
+
+    io.to(sessionId).emit('narrator:done', {
+      fullText: mockResponse,
+      suggestions: ['Look around', 'Talk to someone', 'Move to another room'],
+    });
+
+    console.log(`[batcher] mock narrator response sent for session ${sessionId.slice(0, 8)}`);
+  });
+
   io.on('connection', (socket: GameSocket) => {
     console.log(`[socket] connected: ${socket.id}`);
 
@@ -88,7 +125,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         isConnected: true,
         color: nextPlayerColor(session),
         joinedAt: Date.now(),
-        lastActiveAt: Date.now(),
+        lastActiveAt: 0,  // 0 so the first action is never rate-limited
       };
 
       store.addPlayer(sessionId, player);
@@ -100,6 +137,47 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       io.to(sessionId).emit('player:joined', { player: toPlayerDTO(player), allPlayers });
 
       console.log(`[socket] ${trimmedName} joined session ${sessionId.slice(0, 8)} (${session.players.size}/${session.maxPlayers})`);
+    });
+
+    /* ---- player:action ---- */
+    socket.on('player:action', (data) => {
+      const { sessionId, playerId, message } = data;
+
+      const session = store.get(sessionId);
+      if (!session) return;
+
+      const player = store.getPlayer(sessionId, playerId);
+      if (!player) return;
+
+      // Rate limit: one action per PLAYER_ACTION_COOLDOWN ms
+      const now = Date.now();
+      if (now - player.lastActiveAt < PLAYER_ACTION_COOLDOWN) {
+        socket.emit('session:error', { message: 'Please wait a moment before your next action.' });
+        return;
+      }
+
+      store.updatePlayer(sessionId, playerId, { lastActiveAt: now });
+
+      const action: PlayerAction = {
+        playerId,
+        playerName: player.name,
+        message: message.trim(),
+        timestamp: now,
+        roomId: player.currentRoomId,
+      };
+
+      const timeRemaining = batcher.enqueue(sessionId, action);
+
+      // Notify everyone in the session
+      io.to(sessionId).emit('action:queued', {
+        playerId,
+        playerName: player.name,
+        message: action.message,
+        queueSize: batcher.queueSize(sessionId),
+        timeRemaining,
+      });
+
+      console.log(`[socket] ${player.name} queued action in session ${sessionId.slice(0, 8)} (queue: ${batcher.queueSize(sessionId)}, fires in ${timeRemaining}ms)`);
     });
 
     /* ---- player:typing ---- */
