@@ -2,7 +2,8 @@
  * ChatInput.tsx — Player input field component
  *
  * A text input with send button for player actions.
- * Submits on Enter key or button click.
+ * Always active in multiplayer — never disabled during narrator streaming.
+ * Emits typing status changes for the typing indicator.
  *
  * @author AK Boys Team
  * @since 2026-03-12
@@ -10,30 +11,55 @@
 
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
-  disabled: boolean;
+  onTypingChange?: (isTyping: boolean) => void;
+  playerName?: string;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const typingRef = useRef(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!disabled && inputRef.current) {
+    if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [disabled]);
+  }, []);
+
+  const setTyping = useCallback((isTyping: boolean) => {
+    if (typingRef.current !== isTyping) {
+      typingRef.current = isTyping;
+      onTypingChange?.(isTyping);
+    }
+  }, [onTypingChange]);
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setText(e.target.value);
+
+    // Emit typing: true, then reset after 1.5s of inactivity
+    setTyping(true);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => setTyping(false), 1500);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed) return;
     onSend(trimmed);
     setText('');
+    setTyping(false);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
   }
+
+  const placeholder = playerName
+    ? `What do you do, ${playerName}?`
+    : 'What do you do?';
 
   return (
     <form onSubmit={handleSubmit} style={{
@@ -47,9 +73,8 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         ref={inputRef}
         type="text"
         value={text}
-        onChange={(e) => setText(e.target.value)}
-        disabled={disabled}
-        placeholder={disabled ? 'The narrator is thinking...' : 'What do you do?'}
+        onChange={handleChange}
+        placeholder={placeholder}
         style={{
           flex: 1,
           padding: '14px 18px',
@@ -64,11 +89,11 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
       />
       <button
         type="submit"
-        disabled={disabled || !text.trim()}
+        disabled={!text.trim()}
         style={{
           padding: '14px 28px',
-          backgroundColor: disabled ? '#1a1510' : '#d4a843',
-          color: disabled ? '#5a5040' : '#0a0a0a',
+          backgroundColor: !text.trim() ? '#1a1510' : '#d4a843',
+          color: !text.trim() ? '#5a5040' : '#0a0a0a',
           border: 'none',
           borderRadius: '8px',
           fontSize: '14px',
@@ -76,7 +101,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           fontFamily: 'monospace',
           letterSpacing: '1px',
           textTransform: 'uppercase',
-          cursor: disabled ? 'not-allowed' : 'pointer',
+          cursor: !text.trim() ? 'not-allowed' : 'pointer',
           transition: 'background-color 0.2s',
         }}
       >
