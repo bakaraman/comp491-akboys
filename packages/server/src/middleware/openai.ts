@@ -18,7 +18,7 @@ import type { ChatMessage } from '@akboys/shared';
  * gpt-4o-mini  : fast, cheap, good for dev/testing
  */
 const MODEL = 'gpt-5.4';
-const MAX_TOKENS = 500;
+const MAX_TOKENS = 800;
 const TEMPERATURE = 0.85;
 
 let _client: OpenAI | null = null;

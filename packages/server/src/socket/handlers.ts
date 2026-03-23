@@ -21,6 +21,12 @@ import { toPlayerDTO, SCENARIOS } from '@akboys/shared';
 import type { SessionStore } from '../store/SessionStore.js';
 import { nextPlayerColor } from '../store/SessionStore.js';
 import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
+import {
+  buildMultiplayerSystemPrompt,
+  buildCombinedUserMessage,
+  parseStateChanges,
+} from './prompt-builder.js';
+import { narratorChatStream, suggestFollowUps } from '../middleware/openai.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -44,15 +50,15 @@ function getAllPlayerDTOs(store: SessionStore, sessionId: string) {
 
 export function registerSocketHandlers(io: GameServer, store: SessionStore): void {
   /* ---- Action batcher: fires when the batch timer expires ---- */
-  const batcher = new ActionBatcher(store, (sessionId, actions) => {
+  const batcher = new ActionBatcher(store, async (sessionId, actions) => {
     const session = store.get(sessionId);
     if (!session) return;
 
-    // Build a combined user message from all actions
-    const lines = actions.map(
-      (a) => `[${a.playerName} / ${a.roomId}] "${a.message}"`,
-    );
-    const combinedMessage = `[ACTIONS THIS TURN]\n\n${lines.join('\n')}`;
+    const scenario = SCENARIOS[session.scenarioId];
+    if (!scenario) return;
+
+    // Build the combined user message from all batched actions
+    const combinedMessage = buildCombinedUserMessage(actions);
 
     // Store as a single user message in history
     store.addMessage(sessionId, {
@@ -61,21 +67,77 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       timestamp: Date.now(),
     });
 
-    // TODO (Phase 5): Replace mock response with real OpenAI streaming
-    const mockResponse = `**[Mock Narrator]** Received ${actions.length} action(s):\n\n${actions.map((a) => `- **${a.playerName}** (${a.roomId}): "${a.message}"`).join('\n')}`;
+    // Build the multiplayer system prompt with current player states
+    const systemPrompt = buildMultiplayerSystemPrompt(scenario, session);
 
+    // Mark session as streaming
+    session.isStreaming = true;
+
+    let fullText = '';
+
+    try {
+      // Stream narrator response via OpenAI
+      for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
+        fullText += chunk;
+        io.to(sessionId).emit('narrator:chunk', { content: chunk, fullText });
+      }
+    } catch (err) {
+      console.error(`[batcher] OpenAI streaming error for session ${sessionId.slice(0, 8)}:`, err);
+      fullText = fullText || '*The narrator hesitates, lost in thought...*';
+    }
+
+    // Parse state changes ([MOVE:], [PICKUP:]) from the narrator response
+    const { moves, pickups, cleanText } = parseStateChanges(fullText);
+
+    // Apply moves — update player room
+    for (const move of moves) {
+      const player = Array.from(session.players.values()).find(
+        (p) => p.name === move.playerName,
+      );
+      if (player) {
+        store.updatePlayer(sessionId, player.id, { currentRoomId: move.roomId });
+        if (!player.visitedRooms.includes(move.roomId)) {
+          player.visitedRooms.push(move.roomId);
+        }
+        console.log(`[state] ${move.playerName} moved to ${move.roomId}`);
+      }
+    }
+
+    // Apply pickups — add item to player inventory
+    for (const pickup of pickups) {
+      const player = Array.from(session.players.values()).find(
+        (p) => p.name === pickup.playerName,
+      );
+      if (player && !player.inventory.includes(pickup.itemId)) {
+        player.inventory.push(pickup.itemId);
+        console.log(`[state] ${pickup.playerName} picked up ${pickup.itemId}`);
+      }
+    }
+
+    // Store the clean narrator response (without directives)
     store.addMessage(sessionId, {
       role: 'assistant',
-      content: mockResponse,
+      content: cleanText,
       timestamp: Date.now(),
     });
 
+    // Generate follow-up suggestions
+    let suggestions: string[];
+    try {
+      suggestions = await suggestFollowUps(cleanText);
+    } catch {
+      suggestions = ['Look around', 'Talk to someone', 'Move to another room'];
+    }
+
+    // Emit done event with clean text and suggestions
     io.to(sessionId).emit('narrator:done', {
-      fullText: mockResponse,
-      suggestions: ['Look around', 'Talk to someone', 'Move to another room'],
+      fullText: cleanText,
+      suggestions,
     });
 
-    console.log(`[batcher] mock narrator response sent for session ${sessionId.slice(0, 8)}`);
+    session.isStreaming = false;
+
+    console.log(`[batcher] narrator response complete for session ${sessionId.slice(0, 8)} (${moves.length} moves, ${pickups.length} pickups)`);
   });
 
   io.on('connection', (socket: GameSocket) => {

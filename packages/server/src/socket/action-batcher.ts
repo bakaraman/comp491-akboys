@@ -45,11 +45,11 @@ interface BatchState {
 export class ActionBatcher {
   private batches = new Map<string, BatchState>();
   private store: SessionStore;
-  private onBatchFire: (sessionId: string, actions: PlayerAction[]) => void;
+  private onBatchFire: (sessionId: string, actions: PlayerAction[]) => void | Promise<void>;
 
   constructor(
     store: SessionStore,
-    onBatchFire: (sessionId: string, actions: PlayerAction[]) => void,
+    onBatchFire: (sessionId: string, actions: PlayerAction[]) => void | Promise<void>,
   ) {
     this.store = store;
     this.onBatchFire = onBatchFire;
