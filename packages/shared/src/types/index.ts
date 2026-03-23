@@ -16,4 +16,19 @@ export type {
   ChatMessage,
   ActionRequest,
   ActionResponse,
+  PlayerData,
+  PlayerAction,
+  PlayerColor,
+  MultiplayerChatMessage,
 } from './game';
+
+export { PLAYER_COLORS } from './game';
+
+export type {
+  PlayerDataDTO,
+  SessionStateDTO,
+  ClientToServerEvents,
+  ServerToClientEvents,
+} from './socket-events';
+
+export { toPlayerDTO } from './socket-events';
