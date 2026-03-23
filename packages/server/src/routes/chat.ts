@@ -16,11 +16,12 @@ import { narratorChatStream, suggestFollowUps } from '../middleware/openai.js';
 import { SCENARIOS } from '@akboys/shared';
 import type { Scenario } from '@akboys/shared';
 import { MemorySessionStore } from '../store/SessionStore.js';
+import { toPlayerDTO } from '@akboys/shared';
 
 export const chatRouter = Router();
 
-/** Session store — swap this to FirestoreSessionStore later */
-const store = new MemorySessionStore();
+/** Session store — shared with socket handlers via export */
+export const store = new MemorySessionStore();
 
 /** Build the system prompt from any scenario */
 function buildSystemPrompt(scenario: Scenario): string {
@@ -109,7 +110,7 @@ chatRouter.get('/scenarios', (_req: Request, res: Response) => {
   res.json({ scenarios: list });
 });
 
-/** GET /api/chat/session/:id — Get session info and history */
+/** GET /api/chat/session/:id — Get session info, history, and players */
 chatRouter.get('/session/:id', (req: Request<{ id: string }>, res: Response) => {
   const session = store.get(req.params.id);
   if (!session) {
@@ -123,7 +124,16 @@ chatRouter.get('/session/:id', (req: Request<{ id: string }>, res: Response) => 
     scenarioId: session.scenarioId,
     scenarioTitle: scenario?.title || 'Unknown',
     createdAt: session.createdAt,
-    messages: session.history.map((m) => ({ role: m.role, content: m.content })),
+    messages: session.history.map((m) => ({
+      role: m.role,
+      content: m.content,
+      playerId: m.playerId,
+      playerName: m.playerName,
+      playerColor: m.playerColor,
+    })),
+    players: Array.from(session.players.values()).map(toPlayerDTO),
+    state: session.state,
+    maxPlayers: session.maxPlayers,
   });
 });
 
@@ -187,7 +197,10 @@ chatRouter.post('/suggestions', async (req: Request, res: Response) => {
 /** POST /api/chat/new — Create a new session and return its ID (no streaming) */
 chatRouter.post('/new', (req: Request, res: Response) => {
   try {
-    const { scenarioId = 'noir' } = req.body as { scenarioId?: string };
+    const {
+      scenarioId = 'noir',
+      maxPlayers = 4,
+    } = req.body as { scenarioId?: string; maxPlayers?: number };
 
     const scenario = SCENARIOS[scenarioId];
     if (!scenario) {
@@ -195,8 +208,10 @@ chatRouter.post('/new', (req: Request, res: Response) => {
       return;
     }
 
-    const session = store.create(scenarioId);
-    res.json({ sessionId: session.id, scenarioId });
+    const clampedMax = Math.min(Math.max(Math.round(maxPlayers), 2), 4);
+    const session = store.create(scenarioId, clampedMax);
+
+    res.json({ sessionId: session.id, scenarioId, maxPlayers: session.maxPlayers });
   } catch (err) {
     console.error('[chat/new] error:', err);
     res.status(500).json({ error: 'Failed to create session' });
