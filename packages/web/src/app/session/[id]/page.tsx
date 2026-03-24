@@ -1,7 +1,7 @@
 /**
  * session/[id]/page.tsx — Multiplayer game session page
  *
- * Three-phase page: Loading → Lobby (name entry) → Game.
+ * Four-phase page: Loading → Lobby (join + wait) → Game → Error.
  * Uses Socket.IO for all real-time communication via the
  * useMultiplayerSession hook.
  *
@@ -14,8 +14,9 @@
 import React, { useRef, useEffect, useState, useCallback, use } from 'react';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInput } from '@/components/ChatInput';
+import { PlayerSidebar } from '@/components/PlayerSidebar';
+import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
-import Markdown from 'react-markdown';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -71,6 +72,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [nameInput, setNameInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
+  const [isStartingGame, setIsStartingGame] = useState(false);
 
   const handleJoin = useCallback(async () => {
     const trimmed = nameInput.trim();
@@ -84,6 +86,18 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setIsJoining(false);
   }, [nameInput, isJoining, mp]);
 
+  const handleStartGame = useCallback(async () => {
+    if (isStartingGame) return;
+    setIsStartingGame(true);
+    const ok = await mp.startGame();
+    if (!ok) {
+      setIsStartingGame(false);
+    }
+  }, [isStartingGame, mp]);
+
+  /* ---- Sidebar state ---- */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   /* ---- Auto-scroll ---- */
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -92,8 +106,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }, [mp.messages, mp.streamingText]);
 
-  /* ---- Find my player info ---- */
+  /* ---- Derived state ---- */
   const myPlayer = mp.players.find((p) => p.id === mp.myPlayerId);
+  const isHost = mp.players.length > 0 && mp.players[0]?.id === mp.myPlayerId;
+  const inLobby = mp.myPlayerId && mp.gameState === 'lobby';
+  const inGame = mp.myPlayerId && mp.gameState === 'playing';
 
   /* ================================================================ */
   /*  RENDER: Error                                                    */
@@ -129,45 +146,52 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         height: '100vh', display: 'flex', alignItems: 'center',
         justifyContent: 'center', backgroundColor: '#0a0a0a',
       }}>
-        <p style={{ color: '#4a4540', fontStyle: 'italic' }}>Loading session...</p>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '32px', height: '32px', borderRadius: '50%',
+            border: '3px solid #2a2520', borderTopColor: '#d4a843',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ color: '#4a4540', fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>
+            Loading session...
+          </p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
+  const emoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6';
+
   /* ================================================================ */
-  /*  RENDER: Lobby (not joined yet)                                   */
+  /*  RENDER: Pre-join (name entry)                                    */
   /* ================================================================ */
 
   if (!mp.myPlayerId) {
-    const emoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6';
-
     return (
       <div style={{
         height: '100vh', display: 'flex', alignItems: 'center',
         justifyContent: 'center', backgroundColor: '#0a0a0a',
       }}>
         <div style={{
-          width: '420px', padding: '40px',
+          width: '440px', maxWidth: '90vw', padding: '40px',
           backgroundColor: '#111', border: '1px solid #2a2520',
-          borderRadius: '12px', textAlign: 'center',
+          borderRadius: '16px', textAlign: 'center',
         }}>
-          {/* Scenario title */}
-          <div style={{
-            fontSize: '28px', marginBottom: '4px',
-          }}>
-            {emoji}
-          </div>
+          {/* Scenario header */}
+          <div style={{ fontSize: '36px', marginBottom: '8px' }}>{emoji}</div>
           <h1 style={{
-            fontSize: '22px', color: '#d4a843',
+            fontSize: '24px', color: '#d4a843',
             fontFamily: 'Georgia, serif', fontStyle: 'italic',
             fontWeight: 'normal', margin: '0 0 8px',
           }}>
             {sessionInfo.scenarioTitle}
           </h1>
           <p style={{
-            fontSize: '12px', color: '#4a4540',
-            fontFamily: 'monospace', letterSpacing: '1px',
-            marginBottom: '24px',
+            fontSize: '11px', color: '#4a4540',
+            fontFamily: 'monospace', letterSpacing: '1.5px',
+            marginBottom: '28px',
           }}>
             SESSION {sessionId.slice(0, 8)}
           </p>
@@ -176,18 +200,18 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           {mp.players.length > 0 && (
             <div style={{ marginBottom: '24px' }}>
               <p style={{
-                fontSize: '11px', color: '#6a6050',
+                fontSize: '10px', color: '#5a5545',
                 fontFamily: 'monospace', textTransform: 'uppercase',
-                letterSpacing: '1.5px', marginBottom: '12px',
+                letterSpacing: '2px', marginBottom: '12px',
               }}>
-                Players in session
+                Waiting in lobby ({mp.players.length}/{sessionInfo.maxPlayers})
               </p>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 {mp.players.map((p) => (
                   <div key={p.id} style={{
                     display: 'flex', alignItems: 'center', gap: '6px',
-                    padding: '6px 12px', backgroundColor: '#1a1a1a',
-                    borderRadius: '16px', border: '1px solid #2a2520',
+                    padding: '6px 14px', backgroundColor: '#1a1a1a',
+                    borderRadius: '20px', border: '1px solid #2a2520',
                   }}>
                     <span style={{
                       width: '8px', height: '8px', borderRadius: '50%',
@@ -205,6 +229,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           )}
 
+          {/* Divider */}
+          <div style={{
+            width: '60px', height: '1px',
+            backgroundColor: '#2a2520', margin: '0 auto 24px',
+          }} />
+
           {/* Name input */}
           <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }}>
             <input
@@ -220,9 +250,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 borderRadius: '8px', color: '#e8e0d4',
                 fontSize: '15px', fontFamily: 'Georgia, serif',
                 outline: 'none', textAlign: 'center',
-                boxSizing: 'border-box',
-                marginBottom: '12px',
+                boxSizing: 'border-box', marginBottom: '12px',
+                transition: 'border-color 0.2s',
               }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#d4a843'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#2a2520'; }}
             />
             <button
               type="submit"
@@ -236,7 +268,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 fontFamily: 'monospace', letterSpacing: '1px',
                 textTransform: 'uppercase',
                 cursor: !nameInput.trim() || isJoining ? 'not-allowed' : 'pointer',
-                transition: 'background-color 0.2s',
+                transition: 'all 0.2s',
               }}
             >
               {isJoining ? 'Joining...' : 'Join Game'}
@@ -256,13 +288,226 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           {/* Connection status */}
           {!mp.isConnected && (
             <p style={{
-              marginTop: '12px', fontSize: '12px',
+              marginTop: '12px', fontSize: '11px',
               color: '#6a6050', fontFamily: 'monospace',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
             }}>
+              <span style={{
+                width: '6px', height: '6px', borderRadius: '50%',
+                backgroundColor: '#8a4a4a',
+                display: 'inline-block',
+              }} />
               Connecting to server...
             </p>
           )}
         </div>
+      </div>
+    );
+  }
+
+  /* ================================================================ */
+  /*  RENDER: Lobby (joined, waiting for game start)                   */
+  /* ================================================================ */
+
+  if (inLobby) {
+    return (
+      <div style={{
+        height: '100vh', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', backgroundColor: '#0a0a0a',
+      }}>
+        <div style={{
+          width: '480px', maxWidth: '90vw', padding: '40px',
+          backgroundColor: '#111', border: '1px solid #2a2520',
+          borderRadius: '16px', textAlign: 'center',
+        }}>
+          {/* Scenario header */}
+          <div style={{ fontSize: '36px', marginBottom: '8px' }}>{emoji}</div>
+          <h1 style={{
+            fontSize: '24px', color: '#d4a843',
+            fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            fontWeight: 'normal', margin: '0 0 4px',
+          }}>
+            {sessionInfo.scenarioTitle}
+          </h1>
+          <p style={{
+            fontSize: '11px', color: '#4a4540',
+            fontFamily: 'monospace', letterSpacing: '1.5px',
+            marginBottom: '28px',
+          }}>
+            LOBBY
+          </p>
+
+          {/* Player slots */}
+          <div style={{ marginBottom: '24px' }}>
+            <p style={{
+              fontSize: '10px', color: '#5a5545',
+              fontFamily: 'monospace', textTransform: 'uppercase',
+              letterSpacing: '2px', marginBottom: '16px',
+            }}>
+              Players ({mp.players.length}/{sessionInfo.maxPlayers})
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {mp.players.map((p) => {
+                const isMe = p.id === mp.myPlayerId;
+                return (
+                  <div key={p.id} style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '12px 16px',
+                    backgroundColor: isMe ? '#1a1510' : '#0d0d0d',
+                    border: `1px solid ${isMe ? '#3a3020' : '#1e1e1e'}`,
+                    borderRadius: '10px',
+                    transition: 'all 0.2s',
+                  }}>
+                    {/* Avatar */}
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '50%',
+                      backgroundColor: p.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '15px', fontWeight: 'bold', color: '#0a0a0a',
+                      flexShrink: 0,
+                    }}>
+                      {p.name.charAt(0).toUpperCase()}
+                    </div>
+
+                    {/* Name + status */}
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{
+                        fontSize: '14px', color: p.color,
+                        fontFamily: 'Georgia, serif', fontWeight: 'bold',
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                      }}>
+                        {p.name}
+                        {isMe && (
+                          <span style={{
+                            fontSize: '9px', color: '#6a6050',
+                            fontFamily: 'monospace', textTransform: 'uppercase',
+                            letterSpacing: '1px', padding: '2px 6px',
+                            backgroundColor: '#1a1a1a', borderRadius: '4px',
+                          }}>
+                            you
+                          </span>
+                        )}
+                        {p.id === mp.players[0]?.id && (
+                          <span style={{
+                            fontSize: '9px', color: '#d4a843',
+                            fontFamily: 'monospace', textTransform: 'uppercase',
+                            letterSpacing: '1px', padding: '2px 6px',
+                            backgroundColor: '#1a1510', borderRadius: '4px',
+                            border: '1px solid #3a3020',
+                          }}>
+                            host
+                          </span>
+                        )}
+                      </div>
+                      <div style={{
+                        fontSize: '11px', color: '#4a8a4a',
+                        fontFamily: 'monospace', marginTop: '2px',
+                        display: 'flex', alignItems: 'center', gap: '4px',
+                      }}>
+                        <span style={{
+                          width: '6px', height: '6px', borderRadius: '50%',
+                          backgroundColor: '#4a8a4a',
+                        }} />
+                        Ready
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Empty slots */}
+              {Array.from({ length: sessionInfo.maxPlayers - mp.players.length }).map((_, i) => (
+                <div key={`empty-${i}`} style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '12px 16px',
+                  backgroundColor: '#0a0a0a',
+                  border: '1px dashed #1e1e1e',
+                  borderRadius: '10px',
+                }}>
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '50%',
+                    backgroundColor: '#151515',
+                    border: '1px dashed #2a2520',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: '13px', color: '#3a3530',
+                    fontFamily: 'Georgia, serif', fontStyle: 'italic',
+                  }}>
+                    Waiting for player...
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Copy link */}
+          <div style={{ marginBottom: '16px' }}>
+            <CopyLinkButton />
+          </div>
+
+          {/* Start button (host only) */}
+          {isHost ? (
+            <button
+              onClick={handleStartGame}
+              disabled={isStartingGame || mp.players.length < 1}
+              style={{
+                width: '100%', padding: '16px',
+                backgroundColor: isStartingGame ? '#2a2010' : '#d4a843',
+                color: isStartingGame ? '#5a5040' : '#0a0a0a',
+                border: 'none', borderRadius: '8px',
+                fontSize: '15px', fontWeight: 'bold',
+                fontFamily: 'monospace', letterSpacing: '2px',
+                textTransform: 'uppercase',
+                cursor: isStartingGame ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              {isStartingGame ? 'Starting...' : 'Start Adventure'}
+            </button>
+          ) : (
+            <div style={{
+              padding: '16px',
+              backgroundColor: '#0a0a0a',
+              border: '1px solid #1e1e1e',
+              borderRadius: '8px',
+            }}>
+              <p style={{
+                fontSize: '13px', color: '#6a6050',
+                fontFamily: 'Georgia, serif', fontStyle: 'italic',
+                margin: 0,
+              }}>
+                Waiting for the host to start the game...
+              </p>
+              <div style={{
+                display: 'flex', justifyContent: 'center', gap: '4px',
+                marginTop: '8px',
+              }}>
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out infinite' }} />
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {mp.error && (
+            <p style={{
+              marginTop: '12px', fontSize: '13px',
+              color: '#cf5b5b', fontFamily: 'monospace',
+            }}>
+              {mp.error}
+            </p>
+          )}
+        </div>
+
+        <style>{`
+          @keyframes pulse {
+            0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+            40% { opacity: 1; transform: scale(1.2); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -280,51 +525,78 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }}>
       {/* Header */}
       <div style={{
-        padding: '16px 24px', borderBottom: '1px solid #2a2520',
+        padding: '12px 20px', borderBottom: '1px solid #2a2520',
         backgroundColor: '#0d0d0d', display: 'flex',
         justifyContent: 'space-between', alignItems: 'center',
+        flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{
-            fontSize: '18px', color: '#d4a843',
+            fontSize: '16px', color: '#d4a843',
             fontFamily: 'Georgia, serif', fontStyle: 'italic',
           }}>
-            {SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6'}{' '}{sessionInfo.scenarioTitle}
+            {emoji}{' '}{sessionInfo.scenarioTitle}
           </span>
           <span style={{
-            fontSize: '11px', color: '#4a4540', fontFamily: 'monospace',
+            fontSize: '10px', color: '#3a3530', fontFamily: 'monospace',
             letterSpacing: '1px',
           }}>
-            SESSION {sessionId.slice(0, 8)}
+            {sessionId.slice(0, 8)}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Player avatars */}
-          <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Copy link (compact) */}
+          <CopyLinkButton compact />
+
+          {/* Player avatars — clickable to open sidebar */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title="View players"
+            style={{
+              display: 'flex', gap: '4px', alignItems: 'center',
+              padding: '4px 8px',
+              backgroundColor: 'transparent',
+              border: '1px solid #2a2520',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4a4030'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; }}
+          >
             {mp.players.map((p) => (
               <div
                 key={p.id}
-                title={`${p.name}${p.isConnected ? '' : ' (offline)'}`}
                 style={{
-                  width: '28px', height: '28px', borderRadius: '50%',
+                  width: '24px', height: '24px', borderRadius: '50%',
                   backgroundColor: p.isConnected ? p.color : '#3a3530',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '12px', fontWeight: 'bold', color: '#0a0a0a',
+                  fontSize: '11px', fontWeight: 'bold', color: '#0a0a0a',
                   border: p.id === mp.myPlayerId ? '2px solid #e8e0d4' : '2px solid transparent',
-                  opacity: p.isConnected ? 1 : 0.5,
+                  opacity: p.isConnected ? 1 : 0.4,
                 }}
               >
                 {p.name.charAt(0).toUpperCase()}
               </div>
             ))}
-          </div>
+          </button>
+
           <a
             href="/"
             style={{
-              padding: '8px 16px', backgroundColor: 'transparent',
+              padding: '6px 12px', backgroundColor: 'transparent',
               border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050',
-              fontSize: '12px', fontFamily: 'monospace', textDecoration: 'none',
+              fontSize: '11px', fontFamily: 'monospace', textDecoration: 'none',
               letterSpacing: '1px', textTransform: 'uppercase',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#cf5b5b';
+              e.currentTarget.style.color = '#cf5b5b';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#2a2520';
+              e.currentTarget.style.color = '#6a6050';
             }}
           >
             Leave
@@ -353,8 +625,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         {typingNames.length > 0 && (
           <div style={{
             color: '#4a4540', fontStyle: 'italic', fontSize: '13px',
-            padding: '4px 0', fontFamily: 'Georgia, serif',
+            padding: '6px 0', fontFamily: 'Georgia, serif',
+            display: 'flex', alignItems: 'center', gap: '8px',
           }}>
+            <span style={{ display: 'flex', gap: '3px' }}>
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out infinite' }} />
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
+            </span>
             {typingNames.length === 1
               ? `${typingNames[0]} is typing...`
               : `${typingNames.join(' and ')} are typing...`}
@@ -364,10 +642,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         {/* Batch info */}
         {mp.batchInfo && !mp.isNarratorStreaming && (
           <div style={{
-            color: '#4a4540', fontStyle: 'italic', fontSize: '13px',
-            padding: '4px 0', fontFamily: 'Georgia, serif',
+            color: '#6a6050', fontSize: '12px',
+            padding: '8px 14px', fontFamily: 'monospace',
+            backgroundColor: '#111', border: '1px solid #1e1e1e',
+            borderRadius: '8px', display: 'inline-block',
+            letterSpacing: '0.5px',
           }}>
-            The narrator is gathering actions... ({mp.batchInfo.queueSize} queued)
+            Gathering actions... ({mp.batchInfo.queueSize} queued)
           </div>
         )}
 
@@ -375,8 +656,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         {mp.isNarratorStreaming && !mp.streamingText && (
           <div style={{
             color: '#4a4540', fontStyle: 'italic', fontSize: '14px',
-            padding: '8px 0',
+            padding: '8px 0', display: 'flex', alignItems: 'center', gap: '8px',
           }}>
+            <span style={{ display: 'flex', gap: '3px' }}>
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#d4a843', animation: 'pulse 1.4s ease-in-out infinite' }} />
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#d4a843', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
+              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#d4a843', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
+            </span>
             The narrator contemplates...
           </div>
         )}
@@ -384,7 +670,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       {/* Follow-up suggestions */}
       {mp.suggestions.length > 0 && !mp.isNarratorStreaming && (
-        <div style={{ display: 'flex', gap: '8px', padding: '8px 24px', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap',
+          borderTop: '1px solid #1a1a1a',
+        }}>
           {mp.suggestions.map((s, i) => (
             <button
               key={i}
@@ -404,12 +693,27 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* Input — always active */}
+      {/* Input */}
       <ChatInput
         onSend={mp.sendAction}
         onTypingChange={mp.sendTyping}
         playerName={myPlayer?.name}
       />
+
+      {/* Player sidebar */}
+      <PlayerSidebar
+        players={mp.players}
+        myPlayerId={mp.myPlayerId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      <style>{`
+        @keyframes pulse {
+          0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1.2); }
+        }
+      `}</style>
     </div>
   );
 }

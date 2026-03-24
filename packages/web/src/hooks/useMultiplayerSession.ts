@@ -84,6 +84,7 @@ export function useMultiplayerSession(sessionId: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const [gameState, setGameState] = useState<'lobby' | 'playing' | 'ended'>('lobby');
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -203,6 +204,7 @@ export function useMultiplayerSession(sessionId: string) {
     /* -- Session events -- */
     socket.on('session:state', ({ session }) => {
       setPlayers(session.players);
+      setGameState(session.state);
       // Rebuild message history from server state
       const restored: DisplayMessage[] = session.history.map((m, i) => ({
         id: `restored_${i}`,
@@ -219,6 +221,12 @@ export function useMultiplayerSession(sessionId: string) {
 
     socket.on('session:error', ({ message }) => {
       setError(message);
+    });
+
+    /* -- Game start event -- */
+    socket.on('game:started', ({ players: startedPlayers }) => {
+      setGameState('playing');
+      setPlayers(startedPlayers);
     });
 
     /* -- Connect -- */
@@ -273,6 +281,29 @@ export function useMultiplayerSession(sessionId: string) {
     [sessionId, myPlayerId],
   );
 
+  const startGame = useCallback(
+    async (): Promise<boolean> => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) {
+        setError('Not connected to server');
+        return false;
+      }
+
+      return new Promise((resolve) => {
+        socket.emit('game:start', { sessionId, playerId: myPlayerId }, (resp) => {
+          if (resp.success) {
+            setError(null);
+            resolve(true);
+          } else {
+            setError(resp.error || 'Failed to start game');
+            resolve(false);
+          }
+        });
+      });
+    },
+    [sessionId, myPlayerId],
+  );
+
   const sendTyping = useCallback(
     (isTyping: boolean) => {
       const socket = socketRef.current;
@@ -301,9 +332,11 @@ export function useMultiplayerSession(sessionId: string) {
     isConnected,
     error,
     myPlayerId,
+    gameState,
 
     // Actions
     joinSession,
+    startGame,
     sendAction,
     sendTyping,
   };

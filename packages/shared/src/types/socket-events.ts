@@ -67,6 +67,11 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+
+  'game:start': (
+    data: { sessionId: string; playerId: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
 }
 
 /* ------------------------------------------------------------------ */

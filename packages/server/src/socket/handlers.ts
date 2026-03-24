@@ -256,6 +256,100 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       });
     });
 
+    /* ---- game:start ---- */
+    socket.on('game:start', async (data, callback) => {
+      const { sessionId, playerId } = data;
+
+      const session = store.get(sessionId);
+      if (!session) {
+        callback({ success: false, error: 'Session not found' });
+        return;
+      }
+
+      if (session.state === 'playing') {
+        callback({ success: false, error: 'Game already started' });
+        return;
+      }
+
+      if (session.players.size < 1) {
+        callback({ success: false, error: 'Need at least one player' });
+        return;
+      }
+
+      // Only the first player (host) can start
+      const firstPlayer = Array.from(session.players.values())[0];
+      if (firstPlayer.id !== playerId) {
+        callback({ success: false, error: 'Only the host can start the game' });
+        return;
+      }
+
+      // Transition to playing
+      session.state = 'playing';
+      callback({ success: true });
+
+      const scenario = SCENARIOS[session.scenarioId];
+      if (!scenario) return;
+
+      // Notify all players
+      const allPlayers = getAllPlayerDTOs(store, sessionId);
+      io.to(sessionId).emit('game:started', {
+        sessionId,
+        scenarioTitle: scenario.title,
+        players: allPlayers,
+      });
+
+      // Stream opening narration
+      const systemPrompt = buildMultiplayerSystemPrompt(scenario, session);
+
+      // Build a start message listing all players
+      const playerNames = Array.from(session.players.values()).map((p) => p.name);
+      const startMsg = `Start the game. The players are: ${playerNames.join(', ')}. Describe the scene and welcome them.`;
+
+      store.addMessage(sessionId, { role: 'user', content: startMsg, timestamp: Date.now() });
+
+      session.isStreaming = true;
+      let fullText = '';
+
+      try {
+        for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
+          fullText += chunk;
+          io.to(sessionId).emit('narrator:chunk', { content: chunk, fullText });
+        }
+      } catch (err) {
+        console.error(`[game:start] OpenAI streaming error for session ${sessionId.slice(0, 8)}:`, err);
+        fullText = fullText || '*The narrator clears their throat and begins...*';
+      }
+
+      const { moves, pickups, cleanText } = parseStateChanges(fullText);
+
+      for (const move of moves) {
+        const player = Array.from(session.players.values()).find((p) => p.name === move.playerName);
+        if (player) {
+          store.updatePlayer(sessionId, player.id, { currentRoomId: move.roomId });
+          if (!player.visitedRooms.includes(move.roomId)) player.visitedRooms.push(move.roomId);
+        }
+      }
+
+      for (const pickup of pickups) {
+        const player = Array.from(session.players.values()).find((p) => p.name === pickup.playerName);
+        if (player && !player.inventory.includes(pickup.itemId)) player.inventory.push(pickup.itemId);
+      }
+
+      store.addMessage(sessionId, { role: 'assistant', content: cleanText, timestamp: Date.now() });
+
+      let suggestions: string[];
+      try {
+        suggestions = await suggestFollowUps(cleanText);
+      } catch {
+        suggestions = ['Look around', 'Talk to someone', 'Move to another room'];
+      }
+
+      io.to(sessionId).emit('narrator:done', { fullText: cleanText, suggestions });
+      session.isStreaming = false;
+
+      console.log(`[game:start] opening narration complete for session ${sessionId.slice(0, 8)}`);
+    });
+
     /* ---- player:rejoin ---- */
     socket.on('player:rejoin', (data, callback) => {
       const { sessionId, playerId } = data;
