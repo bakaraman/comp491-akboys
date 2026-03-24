@@ -17,6 +17,7 @@ import { ChatInput } from '@/components/ChatInput';
 import { PlayerSidebar } from '@/components/PlayerSidebar';
 import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
+import { disconnectSocket } from '@/lib/socket';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -94,6 +95,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setIsStartingGame(false);
     }
   }, [isStartingGame, mp]);
+
+  const handleLeave = useCallback(() => {
+    if (!confirm('Are you sure you want to leave the game?')) return;
+    disconnectSocket();
+    window.location.href = '/';
+  }, []);
 
   /* ---- Sidebar state ---- */
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -581,14 +588,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             ))}
           </button>
 
-          <a
-            href="/"
+          <button
+            onClick={handleLeave}
             style={{
               padding: '6px 12px', backgroundColor: 'transparent',
               border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050',
-              fontSize: '11px', fontFamily: 'monospace', textDecoration: 'none',
+              fontSize: '11px', fontFamily: 'monospace',
               letterSpacing: '1px', textTransform: 'uppercase',
-              transition: 'all 0.2s',
+              cursor: 'pointer', transition: 'all 0.2s',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = '#cf5b5b';
@@ -600,7 +607,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             }}
           >
             Leave
-          </a>
+          </button>
         </div>
       </div>
 
@@ -708,10 +715,61 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onClose={() => setSidebarOpen(false)}
       />
 
+      {/* Toast notification (rate limit, errors) */}
+      {mp.toast && (
+        <div style={{
+          position: 'fixed', bottom: '100px', left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '10px 20px',
+          backgroundColor: '#2a1a1a',
+          border: '1px solid #5a3030',
+          borderRadius: '8px',
+          color: '#cf8a8a',
+          fontSize: '13px',
+          fontFamily: 'monospace',
+          zIndex: 60,
+          animation: 'fadeInUp 0.3s ease',
+        }}>
+          {mp.toast}
+        </div>
+      )}
+
+      {/* Reconnecting overlay */}
+      {mp.isReconnecting && (
+        <div style={{
+          position: 'fixed', inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 70,
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{
+              width: '32px', height: '32px', borderRadius: '50%',
+              border: '3px solid #2a2520', borderTopColor: '#d4a843',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 16px',
+            }} />
+            <p style={{
+              color: '#d4a843', fontSize: '14px',
+              fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            }}>
+              Reconnecting...
+            </p>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes pulse {
           0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
           40% { opacity: 1; transform: scale(1.2); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>

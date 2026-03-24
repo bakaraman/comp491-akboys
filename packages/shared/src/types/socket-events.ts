@@ -123,6 +123,7 @@ export interface ServerToClientEvents {
   'action:queued': (data: {
     playerId: string;
     playerName: string;
+    playerColor: string;
     message: string;
     queueSize: number;
     timeRemaining: number;

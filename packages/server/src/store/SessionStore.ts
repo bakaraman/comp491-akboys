@@ -29,6 +29,7 @@ export interface SessionData {
   scenarioId: string;
   history: MultiplayerChatMessage[];
   createdAt: number;
+  lastActivityAt: number;
 
   /* Multiplayer fields */
   players: Map<string, PlayerData>;
@@ -64,12 +65,18 @@ export interface SessionStore {
 export class MemorySessionStore implements SessionStore {
   private sessions: Map<string, SessionData> = new Map();
 
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+  private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
+
   create(scenarioId: string, maxPlayers: number = 4): SessionData {
+    const now = Date.now();
     const session: SessionData = {
       id: uuidv4(),
       scenarioId,
       history: [],
-      createdAt: Date.now(),
+      createdAt: now,
+      lastActivityAt: now,
       players: new Map(),
       actionQueue: [],
       maxPlayers,
@@ -78,7 +85,31 @@ export class MemorySessionStore implements SessionStore {
     };
 
     this.sessions.set(session.id, session);
+    this.startCleanupIfNeeded();
     return session;
+  }
+
+  /** Start the periodic cleanup timer if not already running */
+  private startCleanupIfNeeded(): void {
+    if (this.cleanupTimer) return;
+    this.cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      let cleaned = 0;
+      for (const [id, session] of this.sessions) {
+        if (now - session.lastActivityAt > MemorySessionStore.INACTIVITY_TIMEOUT) {
+          this.sessions.delete(id);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        console.log(`[cleanup] removed ${cleaned} inactive session(s), ${this.sessions.size} remaining`);
+      }
+      // Stop timer if no sessions left
+      if (this.sessions.size === 0 && this.cleanupTimer) {
+        clearInterval(this.cleanupTimer);
+        this.cleanupTimer = null;
+      }
+    }, MemorySessionStore.CLEANUP_INTERVAL);
   }
 
   get(id: string): SessionData | undefined {
@@ -91,6 +122,7 @@ export class MemorySessionStore implements SessionStore {
       throw new Error(`Session not found: ${id}`);
     }
     session.history.push(msg);
+    session.lastActivityAt = Date.now();
   }
 
   delete(id: string): void {
@@ -110,6 +142,7 @@ export class MemorySessionStore implements SessionStore {
       throw new Error(`Session is full (${session.maxPlayers}/${session.maxPlayers} players)`);
     }
     session.players.set(player.id, player);
+    session.lastActivityAt = Date.now();
   }
 
   removePlayer(sessionId: string, playerId: string): void {

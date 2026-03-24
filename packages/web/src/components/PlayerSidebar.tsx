@@ -10,7 +10,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import type { PlayerDataDTO } from '@akboys/shared';
 
 interface PlayerSidebarProps {
@@ -21,6 +21,26 @@ interface PlayerSidebarProps {
 }
 
 export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSidebarProps) {
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+
+  // Lock body scroll when open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
+
   return (
     <>
       {/* Backdrop */}

@@ -85,6 +85,8 @@ export function useMultiplayerSession(sessionId: string) {
   const [error, setError] = useState<string | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [gameState, setGameState] = useState<'lobby' | 'playing' | 'ended'>('lobby');
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -117,7 +119,9 @@ export function useMultiplayerSession(sessionId: string) {
       // Try to rejoin if we have a stored identity for this session
       const stored = loadIdentity(sessionId);
       if (stored) {
+        setIsReconnecting(true);
         socket.emit('player:rejoin', { sessionId, playerId: stored.playerId }, (resp) => {
+          setIsReconnecting(false);
           if (resp.success) {
             setMyPlayerId(stored.playerId);
           } else {
@@ -173,12 +177,13 @@ export function useMultiplayerSession(sessionId: string) {
     });
 
     /* -- Action / batch events -- */
-    socket.on('action:queued', ({ playerName, message, queueSize, timeRemaining }) => {
+    socket.on('action:queued', ({ playerName, playerColor, message, queueSize, timeRemaining }) => {
       setBatchInfo({ queueSize, timeRemaining });
       addMessage({
         role: 'user',
         content: message,
         playerName,
+        playerColor,
         timestamp: Date.now(),
       });
     });
@@ -221,6 +226,9 @@ export function useMultiplayerSession(sessionId: string) {
 
     socket.on('session:error', ({ message }) => {
       setError(message);
+      // Show as toast for transient errors (rate limit etc.)
+      setToast(message);
+      setTimeout(() => setToast(null), 3000);
     });
 
     /* -- Game start event -- */
@@ -333,6 +341,8 @@ export function useMultiplayerSession(sessionId: string) {
     error,
     myPlayerId,
     gameState,
+    isReconnecting,
+    toast,
 
     // Actions
     joinSession,

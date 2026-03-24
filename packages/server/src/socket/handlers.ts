@@ -234,6 +234,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       io.to(sessionId).emit('action:queued', {
         playerId,
         playerName: player.name,
+        playerColor: player.color,
         message: action.message,
         queueSize: batcher.queueSize(sessionId),
         timeRemaining,
