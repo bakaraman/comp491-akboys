@@ -25,11 +25,30 @@ export interface PlayerDataDTO {
   color: string;
 }
 
+/** A communication message between players (NOT narrator) */
+export interface CommMessageDTO {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+  content: string;
+  timestamp: number;
+  mode: 'room' | 'direct';
+  /** For direct messages: the target player id */
+  targetPlayerId?: string;
+  targetPlayerName?: string;
+  /** The room the sender was in when sending (for room messages) */
+  roomId: string;
+  /** Audience snapshot — player IDs who should see this on reconnect */
+  visibleTo: string[];
+}
+
 /** Full session state sent on reconnect */
 export interface SessionStateDTO {
   id: string;
   scenarioId: string;
   scenarioTitle: string;
+  roomCode?: string;
   players: PlayerDataDTO[];
   history: Array<{
     role: string;
@@ -38,7 +57,10 @@ export interface SessionStateDTO {
     playerName?: string;
     playerColor?: string;
   }>;
-  state: 'lobby' | 'playing' | 'ended';
+  state: 'lobby' | 'voting' | 'playing' | 'ended';
+  selectedScenarioId?: string | null;
+  scenarioVotes?: Record<string, string[]>;
+  commHistory?: CommMessageDTO[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +94,38 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+
+  'scenario:select': (data: {
+    sessionId: string;
+    playerId: string;
+    scenarioId: string;
+  }) => void;
+
+  'scenario:vote': (data: {
+    sessionId: string;
+    playerId: string;
+    scenarioId: string;
+  }) => void;
+
+  'scenario:confirm': (
+    data: { sessionId: string; playerId: string; scenarioId: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
+
+  /** Room chat: message to all players in sender's current room */
+  'comm:room': (data: {
+    sessionId: string;
+    playerId: string;
+    content: string;
+  }) => void;
+
+  /** Direct message: targeted to a specific player, any room */
+  'comm:direct': (data: {
+    sessionId: string;
+    playerId: string;
+    targetPlayerId: string;
+    content: string;
+  }) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -85,14 +139,25 @@ export interface ServerToClientEvents {
     players: PlayerDataDTO[];
   }) => void;
 
+  /** Scoped narrator streaming — only the target player receives it */
   'narrator:chunk': (data: {
     content: string;
     fullText: string;
+    targetPlayerId?: string;
   }) => void;
 
+  /** Scoped narrator done — each player gets their own text + suggestions */
   'narrator:done': (data: {
     fullText: string;
     suggestions: string[];
+    targetPlayerId?: string;
+  }) => void;
+
+  /** Room observation — third-person line for same-room witnesses */
+  'narrator:observed': (data: {
+    text: string;
+    actorName: string;
+    roomId: string;
   }) => void;
 
   'narrator:error': (data: { message: string }) => void;
@@ -137,6 +202,14 @@ export interface ServerToClientEvents {
   'session:state': (data: { session: SessionStateDTO }) => void;
 
   'session:error': (data: { message: string }) => void;
+
+  'scenario:updated': (data: {
+    selectedScenarioId: string | null;
+    votes: Record<string, string[]>;
+  }) => void;
+
+  /** Communication message delivery */
+  'comm:message': (data: CommMessageDTO) => void;
 }
 
 /* ------------------------------------------------------------------ */

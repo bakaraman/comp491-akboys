@@ -17,9 +17,10 @@ interface ChatInputProps {
   onSend: (message: string) => void;
   onTypingChange?: (isTyping: boolean) => void;
   playerName?: string;
+  disabled?: boolean;
 }
 
-export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps) {
+export function ChatInput({ onSend, onTypingChange, playerName, disabled }: ChatInputProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const typingRef = useRef(false);
@@ -50,16 +51,20 @@ export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || disabled) return;
     onSend(trimmed);
     setText('');
     setTyping(false);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
   }
 
-  const placeholder = playerName
-    ? `What do you do, ${playerName}?`
-    : 'What do you do?';
+  const placeholder = disabled
+    ? 'The narrator is thinking...'
+    : playerName
+      ? `What do you do, ${playerName}?`
+      : 'What do you do?';
+
+  const isDisabled = disabled || !text.trim();
 
   return (
     <form onSubmit={handleSubmit} style={{
@@ -74,6 +79,7 @@ export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps
         type="text"
         value={text}
         onChange={handleChange}
+        disabled={disabled}
         placeholder={placeholder}
         style={{
           flex: 1,
@@ -89,11 +95,11 @@ export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps
       />
       <button
         type="submit"
-        disabled={!text.trim()}
+        disabled={isDisabled}
         style={{
           padding: '14px 28px',
-          backgroundColor: !text.trim() ? '#1a1510' : '#d4a843',
-          color: !text.trim() ? '#5a5040' : '#0a0a0a',
+          backgroundColor: isDisabled ? '#1a1510' : '#d4a843',
+          color: isDisabled ? '#5a5040' : '#0a0a0a',
           border: 'none',
           borderRadius: '8px',
           fontSize: '14px',
@@ -101,7 +107,7 @@ export function ChatInput({ onSend, onTypingChange, playerName }: ChatInputProps
           fontFamily: 'monospace',
           letterSpacing: '1px',
           textTransform: 'uppercase',
-          cursor: !text.trim() ? 'not-allowed' : 'pointer',
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
           transition: 'background-color 0.2s',
         }}
       >

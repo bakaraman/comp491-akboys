@@ -14,13 +14,50 @@ import React from 'react';
 import Markdown from 'react-markdown';
 
 interface ChatMessageProps {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'observed';
   content: string;
   playerName?: string;
   playerColor?: string;
 }
 
 export function ChatMessage({ role, content, playerName, playerColor }: ChatMessageProps) {
+  /* ---- Observed messages (what you see others doing) ---- */
+  if (role === 'observed') {
+    return (
+      <div style={{
+        padding: '8px 0', marginBottom: '10px',
+      }}>
+        <div style={{
+          padding: '10px 16px',
+          backgroundColor: '#12120f',
+          border: '1px solid #1e1e1a',
+          borderRadius: '8px',
+          borderLeft: '3px solid #6a6050',
+        }}>
+          <div style={{
+            fontSize: '10px', color: '#5a5545',
+            fontFamily: 'monospace', textTransform: 'uppercase',
+            letterSpacing: '1px', marginBottom: '4px',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6a6050" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Observed
+          </div>
+          <div style={{
+            fontSize: '14px', color: '#8a8070',
+            fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            lineHeight: '1.6',
+          }}>
+            {content}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ---- System messages (join/leave/reconnect) ---- */
   if (role === 'system') {
     return (

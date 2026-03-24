@@ -1,8 +1,8 @@
 /**
- * page.tsx — Home page with scenario picker and multiplayer setup
+ * page.tsx — Main menu: choose Single Player or Multiplayer
  *
- * Player picks a story, selects player count (2-4), creates a session,
- * then gets redirected to /session/[uuid] lobby.
+ * Landing page with two mode cards. Shows a name popup on first visit.
+ * Profile button in top-right to change name anytime.
  *
  * @author AK Boys Team
  * @since 2026-03-12
@@ -10,231 +10,152 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
-
-const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
-
-const SCENARIO_EMOJI: Record<string, string> = {
-  noir: '\uD83D\uDD75\uFE0F',
-  haunted: '\uD83D\uDC7B',
-  space: '\uD83D\uDE80',
-  pirate: '\uD83C\uDFF4\u200D\u2620\uFE0F',
-  western: '\uD83E\uDD20',
-  cyberpunk: '\uD83C\uDF03',
-};
-
-interface ScenarioInfo {
-  id: string;
-  title: string;
-  setting: string;
-  synopsis: string;
-}
+import { usePlayerName } from '@/hooks/usePlayerName';
+import { NamePopup } from '@/components/NamePopup';
+import { ProfileButton } from '@/components/ProfileButton';
 
 export default function HomePage() {
   const router = useRouter();
-  const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [maxPlayers, setMaxPlayers] = useState(2);
-  const [isStarting, setIsStarting] = useState(false);
+  const { name, loaded, setName } = usePlayerName();
 
-  useEffect(() => {
-    fetch(`${API_BASE}/api/chat/scenarios`)
-      .then((r) => r.json())
-      .then((data) => setScenarios(data.scenarios || []))
-      .catch(() => {});
-  }, []);
-
-  async function handleStart() {
-    if (!selected || isStarting) return;
-    setIsStarting(true);
-
-    try {
-      const res = await fetch(`${API_BASE}/api/chat/new`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selected, maxPlayers }),
-      });
-      const data = await res.json();
-      if (data.sessionId) {
-        router.push(`/session/${data.sessionId}`);
-      }
-    } catch {
-      setIsStarting(false);
-    }
-  }
-
-  const selectedScenario = scenarios.find((s) => s.id === selected);
+  // Don't render until localStorage is read
+  if (!loaded) return null;
 
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', backgroundColor: '#0a0a0a',
-      padding: '24px', overflowY: 'auto',
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: '#0a0a0a', padding: '24px',
     }}>
-      <div style={{ textAlign: 'center', maxWidth: '720px', marginTop: '48px', width: '100%' }}>
+      {/* First-time name popup */}
+      {!name && (
+        <NamePopup onSave={setName} />
+      )}
+
+      {/* Profile button (only when name is set) */}
+      {name && (
+        <ProfileButton name={name} onNameChange={setName} />
+      )}
+
+      <div style={{ textAlign: 'center', maxWidth: '600px', width: '100%' }}>
         {/* Title */}
         <h1 style={{
-          fontSize: '36px', color: '#d4a843', fontFamily: 'Georgia, serif',
-          fontWeight: 'normal', fontStyle: 'italic', marginBottom: '8px',
+          fontSize: '42px', color: '#d4a843',
+          fontFamily: 'Georgia, serif', fontStyle: 'italic',
+          fontWeight: 'normal', marginBottom: '8px',
+          letterSpacing: '-0.5px',
         }}>
-          Choose Your Story
+          The Velvet Shadow
         </h1>
         <p style={{
-          fontSize: '14px', color: '#6a6050', fontFamily: 'monospace',
-          letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '40px',
+          fontSize: '13px', color: '#5a5545',
+          fontFamily: 'monospace', letterSpacing: '3px',
+          textTransform: 'uppercase', marginBottom: '48px',
         }}>
-          Multiplayer AI-Powered Text Adventure
+          AI-Powered Text Adventure
         </p>
 
-        {/* Scenario cards */}
+        {/* Mode cards */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
-          gap: '12px', marginBottom: '32px', textAlign: 'left',
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: '16px', marginBottom: '48px',
         }}>
-          {scenarios.map((s) => {
-            const isSelected = selected === s.id;
-            return (
-              <button
-                key={s.id}
-                onClick={() => setSelected(s.id)}
-                style={{
-                  padding: '20px',
-                  backgroundColor: isSelected ? '#1a1510' : '#111',
-                  border: `2px solid ${isSelected ? '#d4a843' : '#1a1a1a'}`,
-                  borderRadius: '12px', cursor: 'pointer',
-                  textAlign: 'left', transition: 'all 0.25s ease',
-                  position: 'relative', overflow: 'hidden',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.borderColor = '#3a3020';
-                    e.currentTarget.style.backgroundColor = '#151210';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.borderColor = '#1a1a1a';
-                    e.currentTarget.style.backgroundColor = '#111';
-                  }
-                }}
-              >
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>
-                  {SCENARIO_EMOJI[s.id] || '\uD83D\uDCD6'}
-                </div>
-                <div style={{
-                  fontSize: '15px',
-                  color: isSelected ? '#d4a843' : '#b0a080',
-                  fontFamily: 'Georgia, serif', fontWeight: 'bold', marginBottom: '6px',
-                  transition: 'color 0.2s',
-                }}>
-                  {s.title}
-                </div>
-                <div style={{
-                  fontSize: '12px', color: '#5a5545',
-                  fontFamily: 'monospace', lineHeight: '1.5',
-                }}>
-                  {s.setting}
-                </div>
-              </button>
-            );
-          })}
+          {/* Single Player */}
+          <button
+            onClick={() => router.push('/singleplayer')}
+            style={{
+              padding: '36px 24px',
+              backgroundColor: '#111',
+              border: '1px solid #1e1e1e',
+              borderRadius: '14px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#d4a843';
+              e.currentTarget.style.backgroundColor = '#141210';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#1e1e1e';
+              e.currentTarget.style.backgroundColor = '#111';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: '36px', marginBottom: '14px' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4a843" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+            <div style={{
+              fontSize: '18px', color: '#e8e0d4',
+              fontFamily: 'Georgia, serif', fontWeight: 'bold',
+              marginBottom: '8px',
+            }}>
+              Single Player
+            </div>
+            <div style={{
+              fontSize: '12px', color: '#5a5545',
+              fontFamily: 'monospace', lineHeight: '1.5',
+            }}>
+              Solo adventure with the AI narrator
+            </div>
+          </button>
+
+          {/* Multiplayer */}
+          <button
+            onClick={() => router.push('/multiplayer')}
+            style={{
+              padding: '36px 24px',
+              backgroundColor: '#111',
+              border: '1px solid #1e1e1e',
+              borderRadius: '14px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#d4a843';
+              e.currentTarget.style.backgroundColor = '#141210';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#1e1e1e';
+              e.currentTarget.style.backgroundColor = '#111';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: '36px', marginBottom: '14px' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4a843" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <div style={{
+              fontSize: '18px', color: '#e8e0d4',
+              fontFamily: 'Georgia, serif', fontWeight: 'bold',
+              marginBottom: '8px',
+            }}>
+              Multiplayer
+            </div>
+            <div style={{
+              fontSize: '12px', color: '#5a5545',
+              fontFamily: 'monospace', lineHeight: '1.5',
+            }}>
+              Play with 2-4 friends in real-time
+            </div>
+          </button>
         </div>
 
-        {/* Selected scenario detail panel */}
-        {selectedScenario && (
-          <div style={{
-            backgroundColor: '#111', border: '1px solid #2a2520',
-            borderRadius: '12px', padding: '28px 32px',
-            marginBottom: '32px', textAlign: 'left',
-            animation: 'fadeIn 0.3s ease',
-          }}>
-            {/* Synopsis */}
-            <p style={{
-              fontSize: '15px', color: '#9a9080', lineHeight: '1.8',
-              marginBottom: '28px', fontFamily: 'Georgia, serif', fontStyle: 'italic',
-            }}>
-              {selectedScenario.synopsis}
-            </p>
-
-            {/* Player count selector */}
-            <div style={{ marginBottom: '28px' }}>
-              <p style={{
-                fontSize: '11px', color: '#6a6050',
-                fontFamily: 'monospace', textTransform: 'uppercase',
-                letterSpacing: '1.5px', marginBottom: '12px',
-              }}>
-                Number of Players
-              </p>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {[2, 3, 4].map((n) => {
-                  const isActive = maxPlayers === n;
-                  return (
-                    <button
-                      key={n}
-                      onClick={() => setMaxPlayers(n)}
-                      style={{
-                        flex: 1, padding: '12px 0',
-                        backgroundColor: isActive ? '#d4a843' : '#0a0a0a',
-                        color: isActive ? '#0a0a0a' : '#6a6050',
-                        border: `1px solid ${isActive ? '#d4a843' : '#2a2520'}`,
-                        borderRadius: '8px', cursor: 'pointer',
-                        fontSize: '14px', fontFamily: 'monospace',
-                        fontWeight: isActive ? 'bold' : 'normal',
-                        letterSpacing: '0.5px',
-                        transition: 'all 0.2s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.borderColor = '#4a4030';
-                          e.currentTarget.style.color = '#9a9080';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.borderColor = '#2a2520';
-                          e.currentTarget.style.color = '#6a6050';
-                        }
-                      }}
-                    >
-                      {n} {n === 2 ? 'Players' : 'Players'}
-                    </button>
-                  );
-                })}
-              </div>
-              <p style={{
-                fontSize: '11px', color: '#4a4540',
-                fontFamily: 'monospace', marginTop: '8px',
-                lineHeight: '1.5',
-              }}>
-                Share the session link with friends to join your game
-              </p>
-            </div>
-
-            {/* Start button */}
-            <button
-              onClick={handleStart}
-              disabled={isStarting}
-              style={{
-                width: '100%', padding: '16px',
-                backgroundColor: isStarting ? '#2a2010' : '#d4a843',
-                color: isStarting ? '#5a5040' : '#0a0a0a',
-                border: 'none', borderRadius: '8px', fontSize: '16px',
-                fontWeight: 'bold', fontFamily: 'monospace',
-                letterSpacing: '2px', textTransform: 'uppercase',
-                cursor: isStarting ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              {isStarting ? 'Creating Session...' : 'Create Game'}
-            </button>
-          </div>
-        )}
-
         <p style={{
-          marginTop: '32px', fontSize: '12px',
-          color: '#3a3530', fontFamily: 'monospace',
+          fontSize: '11px', color: '#2a2520',
+          fontFamily: 'monospace',
         }}>
           COMP 491 — AK Boys — Spring 2026
         </p>

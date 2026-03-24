@@ -4,6 +4,9 @@
  * Manages the full Socket.IO lifecycle: connect, join/rejoin, listen
  * for events, and expose state + actions to the session page.
  *
+ * Separates game actions (narrator pipeline) from communication
+ * (player-to-player, never touches narrator).
+ *
  * @author AK Boys Team
  * @since 2026-03-24
  */
@@ -11,7 +14,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { PlayerDataDTO } from '@akboys/shared';
+import type { PlayerDataDTO, CommMessageDTO } from '@akboys/shared';
 import { getSocket, disconnectSocket, type GameSocket } from '../lib/socket';
 
 /* ------------------------------------------------------------------ */
@@ -20,7 +23,7 @@ import { getSocket, disconnectSocket, type GameSocket } from '../lib/socket';
 
 export interface DisplayMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'observed';
   content: string;
   playerId?: string;
   playerName?: string;
@@ -46,9 +49,7 @@ interface StoredIdentity {
 const STORAGE_KEY = 'akboys_player';
 
 function saveIdentity(identity: StoredIdentity): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
-  } catch { /* storage full or blocked */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(identity)); } catch { /* */ }
 }
 
 function loadIdentity(sessionId: string): StoredIdentity | null {
@@ -57,15 +58,11 @@ function loadIdentity(sessionId: string): StoredIdentity | null {
     if (!raw) return null;
     const parsed: StoredIdentity = JSON.parse(raw);
     return parsed.sessionId === sessionId ? parsed : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function clearIdentity(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch { /* ignore */ }
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -76,6 +73,7 @@ export function useMultiplayerSession(sessionId: string) {
   /* ---- State ---- */
   const [players, setPlayers] = useState<PlayerDataDTO[]>([]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [commMessages, setCommMessages] = useState<CommMessageDTO[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [typingPlayers, setTypingPlayers] = useState<Map<string, string>>(new Map());
@@ -84,12 +82,19 @@ export function useMultiplayerSession(sessionId: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
-  const [gameState, setGameState] = useState<'lobby' | 'playing' | 'ended'>('lobby');
+  const [gameState, setGameState] = useState<'lobby' | 'voting' | 'playing' | 'ended'>('lobby');
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const [scenarioVotes, setScenarioVotes] = useState<Record<string, string[]>>({});
+  const [unreadComm, setUnreadComm] = useState(0);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
+  const myPlayerIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync
+  useEffect(() => { myPlayerIdRef.current = myPlayerId; }, [myPlayerId]);
 
   /* ---- Helpers ---- */
 
@@ -116,7 +121,6 @@ export function useMultiplayerSession(sessionId: string) {
       setIsConnected(true);
       setError(null);
 
-      // Try to rejoin if we have a stored identity for this session
       const stored = loadIdentity(sessionId);
       if (stored) {
         setIsReconnecting(true);
@@ -125,7 +129,6 @@ export function useMultiplayerSession(sessionId: string) {
           if (resp.success) {
             setMyPlayerId(stored.playerId);
           } else {
-            // Identity is stale — clear it
             clearIdentity();
           }
         });
@@ -167,11 +170,8 @@ export function useMultiplayerSession(sessionId: string) {
     socket.on('player:typing-update', ({ playerId, playerName, isTyping }) => {
       setTypingPlayers((prev) => {
         const next = new Map(prev);
-        if (isTyping) {
-          next.set(playerId, playerName);
-        } else {
-          next.delete(playerId);
-        }
+        if (isTyping) next.set(playerId, playerName);
+        else next.delete(playerId);
         return next;
       });
     });
@@ -188,20 +188,37 @@ export function useMultiplayerSession(sessionId: string) {
       });
     });
 
-    /* -- Narrator events -- */
-    socket.on('narrator:chunk', ({ fullText }) => {
-      setIsNarratorStreaming(true);
-      setStreamingText(fullText);
+    /* -- Narrator events (scoped) -- */
+    socket.on('narrator:chunk', ({ fullText, targetPlayerId }) => {
+      // Only show streaming if it's for me or for everyone (no target = opening)
+      const me = myPlayerIdRef.current;
+      if (!targetPlayerId || targetPlayerId === me) {
+        setIsNarratorStreaming(true);
+        setStreamingText(fullText);
+      }
     });
 
-    socket.on('narrator:done', ({ fullText, suggestions: sugg }) => {
-      setIsNarratorStreaming(false);
-      setStreamingText('');
-      setBatchInfo(null);
-      setSuggestions(sugg);
+    socket.on('narrator:done', ({ fullText, suggestions: sugg, targetPlayerId }) => {
+      const me = myPlayerIdRef.current;
+      if (!targetPlayerId || targetPlayerId === me) {
+        setIsNarratorStreaming(false);
+        setStreamingText('');
+        setBatchInfo(null);
+        setSuggestions(sugg);
+        addMessage({
+          role: 'assistant',
+          content: fullText,
+          timestamp: Date.now(),
+        });
+      }
+    });
+
+    /* -- Observed narration (same-room witness) -- */
+    socket.on('narrator:observed', ({ text, actorName }) => {
       addMessage({
-        role: 'assistant',
-        content: fullText,
+        role: 'observed',
+        content: text,
+        playerName: actorName,
         timestamp: Date.now(),
       });
     });
@@ -210,10 +227,14 @@ export function useMultiplayerSession(sessionId: string) {
     socket.on('session:state', ({ session }) => {
       setPlayers(session.players);
       setGameState(session.state);
-      // Rebuild message history from server state
+      if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
+      if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
+      if (session.commHistory) setCommMessages(session.commHistory);
+
+      // Rebuild message history — server already filtered for this player
       const restored: DisplayMessage[] = session.history.map((m, i) => ({
         id: `restored_${i}`,
-        role: m.role as DisplayMessage['role'],
+        role: ((m as any).messageType === 'observed' ? 'observed' : m.role) as DisplayMessage['role'],
         content: m.content,
         playerId: m.playerId,
         playerName: m.playerName,
@@ -226,7 +247,6 @@ export function useMultiplayerSession(sessionId: string) {
 
     socket.on('session:error', ({ message }) => {
       setError(message);
-      // Show as toast for transient errors (rate limit etc.)
       setToast(message);
       setTimeout(() => setToast(null), 3000);
     });
@@ -235,6 +255,18 @@ export function useMultiplayerSession(sessionId: string) {
     socket.on('game:started', ({ players: startedPlayers }) => {
       setGameState('playing');
       setPlayers(startedPlayers);
+    });
+
+    /* -- Scenario voting events -- */
+    socket.on('scenario:updated', ({ selectedScenarioId: sel, votes }) => {
+      setSelectedScenarioId(sel);
+      setScenarioVotes(votes);
+    });
+
+    /* -- Communication events -- */
+    socket.on('comm:message', (msg: CommMessageDTO) => {
+      setCommMessages((prev) => [...prev, msg]);
+      setUnreadComm((prev) => prev + 1);
     });
 
     /* -- Connect -- */
@@ -253,10 +285,7 @@ export function useMultiplayerSession(sessionId: string) {
   const joinSession = useCallback(
     async (playerName: string): Promise<boolean> => {
       const socket = socketRef.current;
-      if (!socket?.connected) {
-        setError('Not connected to server');
-        return false;
-      }
+      if (!socket?.connected) { setError('Not connected to server'); return false; }
 
       return new Promise((resolve) => {
         socket.emit('player:join', { sessionId, playerName }, (resp) => {
@@ -279,11 +308,60 @@ export function useMultiplayerSession(sessionId: string) {
     (message: string) => {
       const socket = socketRef.current;
       if (!socket?.connected || !myPlayerId) return;
+      socket.emit('player:action', { sessionId, playerId: myPlayerId, message });
+    },
+    [sessionId, myPlayerId],
+  );
 
-      socket.emit('player:action', {
-        sessionId,
-        playerId: myPlayerId,
-        message,
+  const sendRoomMessage = useCallback(
+    (content: string) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return;
+      socket.emit('comm:room', { sessionId, playerId: myPlayerId, content });
+    },
+    [sessionId, myPlayerId],
+  );
+
+  const sendDirectMessage = useCallback(
+    (targetPlayerId: string, content: string) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return;
+      socket.emit('comm:direct', { sessionId, playerId: myPlayerId, targetPlayerId, content });
+    },
+    [sessionId, myPlayerId],
+  );
+
+  const clearUnreadComm = useCallback(() => {
+    setUnreadComm(0);
+  }, []);
+
+  const selectScenario = useCallback(
+    (scenarioId: string) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return;
+      socket.emit('scenario:select', { sessionId, playerId: myPlayerId, scenarioId });
+    },
+    [sessionId, myPlayerId],
+  );
+
+  const voteScenario = useCallback(
+    (scenarioId: string) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return;
+      socket.emit('scenario:vote', { sessionId, playerId: myPlayerId, scenarioId });
+    },
+    [sessionId, myPlayerId],
+  );
+
+  const confirmScenario = useCallback(
+    async (scenarioId: string): Promise<boolean> => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) { setError('Not connected to server'); return false; }
+      return new Promise((resolve) => {
+        socket.emit('scenario:confirm', { sessionId, playerId: myPlayerId, scenarioId }, (resp) => {
+          if (resp.success) { setError(null); resolve(true); }
+          else { setError(resp.error || 'Failed to confirm scenario'); resolve(false); }
+        });
       });
     },
     [sessionId, myPlayerId],
@@ -292,20 +370,11 @@ export function useMultiplayerSession(sessionId: string) {
   const startGame = useCallback(
     async (): Promise<boolean> => {
       const socket = socketRef.current;
-      if (!socket?.connected || !myPlayerId) {
-        setError('Not connected to server');
-        return false;
-      }
-
+      if (!socket?.connected || !myPlayerId) { setError('Not connected to server'); return false; }
       return new Promise((resolve) => {
         socket.emit('game:start', { sessionId, playerId: myPlayerId }, (resp) => {
-          if (resp.success) {
-            setError(null);
-            resolve(true);
-          } else {
-            setError(resp.error || 'Failed to start game');
-            resolve(false);
-          }
+          if (resp.success) { setError(null); resolve(true); }
+          else { setError(resp.error || 'Failed to start game'); resolve(false); }
         });
       });
     },
@@ -316,12 +385,7 @@ export function useMultiplayerSession(sessionId: string) {
     (isTyping: boolean) => {
       const socket = socketRef.current;
       if (!socket?.connected || !myPlayerId) return;
-
-      socket.emit('player:typing', {
-        sessionId,
-        playerId: myPlayerId,
-        isTyping,
-      });
+      socket.emit('player:typing', { sessionId, playerId: myPlayerId, isTyping });
     },
     [sessionId, myPlayerId],
   );
@@ -329,9 +393,9 @@ export function useMultiplayerSession(sessionId: string) {
   /* ---- Return ---- */
 
   return {
-    // State
     players,
     messages,
+    commMessages,
     suggestions,
     streamingText,
     typingPlayers,
@@ -343,11 +407,19 @@ export function useMultiplayerSession(sessionId: string) {
     gameState,
     isReconnecting,
     toast,
+    selectedScenarioId,
+    scenarioVotes,
+    unreadComm,
 
-    // Actions
     joinSession,
+    selectScenario,
+    voteScenario,
+    confirmScenario,
     startGame,
     sendAction,
+    sendRoomMessage,
+    sendDirectMessage,
+    clearUnreadComm,
     sendTyping,
   };
 }

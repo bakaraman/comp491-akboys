@@ -20,12 +20,14 @@ export type {
   PlayerAction,
   PlayerColor,
   MultiplayerChatMessage,
+  WorldStateEvent,
 } from './game';
 
 export { PLAYER_COLORS } from './game';
 
 export type {
   PlayerDataDTO,
+  CommMessageDTO,
   SessionStateDTO,
   ClientToServerEvents,
   ServerToClientEvents,

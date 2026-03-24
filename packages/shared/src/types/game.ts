@@ -116,4 +116,22 @@ export interface MultiplayerChatMessage extends ChatMessage {
   playerId?: string;
   playerName?: string;
   playerColor?: string;
+  /** IDs of players who should see this message on reconnect */
+  visibleTo?: string[];
+  /** Sub-role for scoped rendering (observed, private, global) */
+  messageType?: 'private' | 'observed' | 'global' | 'action';
+}
+
+/* ------------------------------------------------------------------ */
+/*  World state event types                                            */
+/* ------------------------------------------------------------------ */
+
+/** Structured state mutation reported by the narrator */
+export interface WorldStateEvent {
+  type: 'move' | 'pickup' | 'open' | 'close' | 'unlock' | 'break' | 'reveal' | 'use' | 'remove' | 'state_change';
+  playerName: string;
+  targetId: string;
+  detail?: string;
+  roomId: string;
+  timestamp: number;
 }
