@@ -8,7 +8,7 @@
  * @since 2026-03-12
  */
 
-import type { Scenario } from '../types/game';
+import type { Scenario } from '../types/game.js';
 
 export const NOIR_SCENARIO: Scenario = {
   title: 'The Velvet Shadow',
@@ -17,6 +17,12 @@ export const NOIR_SCENARIO: Scenario = {
     'A jazz singer has gone missing from The Velvet Lounge. ' +
     'You are a private detective hired to find her. ' +
     'The rain never stops, the whiskey is cheap, and everyone has something to hide.',
+  maxTurns: 12,
+  solution: {
+    culpritId: 'bartender',
+    evidenceId: 'matchbook',
+    requiredEvidenceIds: ['broken_necklace', 'diary', 'matchbook', 'cigarette_butt'],
+  },
   rooms: [
     {
       id: 'office',

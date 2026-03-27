@@ -5,5 +5,5 @@
  * @since 2026-03-12
  */
 
-export { NOIR_SCENARIO } from './scenario';
-export { SCENARIOS } from './scenarios';
+export { NOIR_SCENARIO } from './scenario.js';
+export { SCENARIOS } from './scenarios.js';

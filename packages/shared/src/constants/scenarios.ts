@@ -8,7 +8,7 @@
  * @since 2026-03-12
  */
 
-import type { Scenario } from '../types/game';
+import type { Scenario } from '../types/game.js';
 
 export const SCENARIOS: Record<string, Scenario> = {
   /* ------------------------------------------------------------------ */
@@ -21,6 +21,12 @@ export const SCENARIOS: Record<string, Scenario> = {
       'A jazz singer has gone missing from The Velvet Lounge. ' +
       'You are a private detective hired to find her. ' +
       'The rain never stops, the whiskey is cheap, and everyone has something to hide.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'bartender',
+      evidenceId: 'matchbook',
+      requiredEvidenceIds: ['broken_necklace', 'diary', 'matchbook', 'cigarette_butt'],
+    },
     rooms: [
       {
         id: 'office',
@@ -131,6 +137,12 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'You are a paranormal investigator called to Hollow Manor after the owner vanished. ' +
       'The locals say the house is alive. Your job is to find out what really happened.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'caretaker',
+      evidenceId: 'old_journal',
+      requiredEvidenceIds: ['old_journal', 'silver_knife', 'torn_photograph'],
+    },
     rooms: [
       {
         id: 'foyer',
@@ -232,6 +244,12 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'Three crew members have gone missing aboard Station Zero. ' +
       'You are the head of security. The station AI is glitching, and the airlocks are cycling on their own.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'scientist',
+      evidenceId: 'research_notes',
+      requiredEvidenceIds: ['access_log', 'sample_vial', 'research_notes'],
+    },
     rooms: [
       {
         id: 'bridge',
@@ -333,6 +351,12 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'The treasure map that would make the crew rich has been stolen from the captain\'s cabin. ' +
       'You are the first mate, and the captain wants answers before the tide goes out.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'quartermaster',
+      evidenceId: 'hidden_note',
+      requiredEvidenceIds: ['broken_lock', 'torn_cloth', 'hidden_note'],
+    },
     rooms: [
       {
         id: 'main_deck',
@@ -433,6 +457,12 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'Sheriff Morgan was found dead in his office at dawn. ' +
       'You are a bounty hunter passing through town, and the deputy has asked for your help before the killer escapes.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'shopkeeper',
+      evidenceId: 'receipt',
+      requiredEvidenceIds: ['spent_casing', 'sheriff_badge', 'receipt'],
+    },
     rooms: [
       {
         id: 'saloon',
@@ -535,6 +565,12 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'A legendary hacker known as "Specter" has gone missing from the grid. ' +
       'You are a street runner hired by an anonymous client to find them before a megacorp does.',
+    maxTurns: 12,
+    solution: {
+      culpritId: 'fixer',
+      evidenceId: 'encrypted_drive',
+      requiredEvidenceIds: ['data_chip', 'encrypted_drive', 'shattered_tablet'],
+    },
     rooms: [
       {
         id: 'noodle_bar',
