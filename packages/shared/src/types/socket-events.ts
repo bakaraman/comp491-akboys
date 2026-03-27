@@ -8,7 +8,7 @@
  * @since 2026-03-23
  */
 
-import type { PlayerData } from './game';
+import type { PlayerData } from './game.js';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs (Data Transfer Objects)                                       */

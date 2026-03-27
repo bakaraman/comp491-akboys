@@ -44,6 +44,12 @@ export interface Scenario {
   npcs: NPC[];
   items: Item[];
   synopsis: string;
+  maxTurns: number;
+  solution: {
+    culpritId: string;
+    evidenceId: string;
+    requiredEvidenceIds: string[];
+  };
 }
 
 /** Player state during a game session */
@@ -53,6 +59,10 @@ export interface GameState {
   visitedRooms: string[];
   conversationHistory: ChatMessage[];
   isGameOver: boolean;
+  status: 'playing' | 'won' | 'lost';
+  turnCount: number;
+  discoveredEvidence: string[];
+  endReason?: 'solved' | 'wrong_accusation' | 'turn_limit' | 'fatal_choice';
 }
 
 /** A single chat message between player and narrator */

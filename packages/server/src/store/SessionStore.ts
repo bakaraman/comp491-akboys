@@ -10,8 +10,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 import type {
   ChatMessage,
+  GameState,
   MultiplayerChatMessage,
   PlayerData,
   PlayerAction,
@@ -33,6 +36,7 @@ export interface SessionData {
   history: MultiplayerChatMessage[];
   createdAt: number;
   lastActivityAt: number;
+  gameState: GameState;
 
   /* Multiplayer fields */
   players: Map<string, PlayerData>;
@@ -64,10 +68,21 @@ export interface SessionData {
 
 /** Contract every session store must satisfy */
 export interface SessionStore {
-  create(scenarioId: string, maxPlayers?: number, roomCode?: string): SessionData;
+  create(
+    scenarioId: string,
+    maxPlayers?: number,
+    roomCode?: string,
+    startRoomId?: string,
+  ): SessionData;
   get(id: string): SessionData | undefined;
   getByRoomCode(code: string): SessionData | undefined;
   addMessage(id: string, msg: MultiplayerChatMessage): void;
+  updateGameState(
+    id: string,
+    updates: Partial<Omit<GameState, 'conversationHistory'>>,
+  ): void;
+  hydrate(): Promise<void>;
+  sync(sessionId: string): Promise<void>;
   delete(id: string): void;
 
   /* Player management */
@@ -106,13 +121,18 @@ export function generateRoomCode(existingCodes: Set<string>): string {
 
 /** In-memory session store using a Map */
 export class MemorySessionStore implements SessionStore {
-  private sessions: Map<string, SessionData> = new Map();
-  private roomCodeIndex: Map<string, string> = new Map(); // roomCode -> sessionId
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  protected sessions: Map<string, SessionData> = new Map();
+  protected roomCodeIndex: Map<string, string> = new Map(); // roomCode -> sessionId
+  protected cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
 
-  create(scenarioId: string, maxPlayers: number = 4, roomCode?: string): SessionData {
+  create(
+    scenarioId: string,
+    maxPlayers: number = 4,
+    roomCode?: string,
+    startRoomId: string = 'start',
+  ): SessionData {
     const now = Date.now();
     const session: SessionData = {
       id: uuidv4(),
@@ -121,10 +141,20 @@ export class MemorySessionStore implements SessionStore {
       history: [],
       createdAt: now,
       lastActivityAt: now,
+      gameState: {
+        currentRoomId: startRoomId,
+        inventory: [],
+        visitedRooms: startRoomId === 'start' ? [] : [startRoomId],
+        conversationHistory: [],
+        isGameOver: false,
+        status: 'playing',
+        turnCount: 0,
+        discoveredEvidence: [],
+      },
       players: new Map(),
       actionQueue: [],
       maxPlayers,
-      state: roomCode ? 'voting' : 'lobby',
+      state: maxPlayers === 1 ? 'playing' : roomCode ? 'voting' : 'lobby',
       isStreaming: false,
       selectedScenarioId: null,
       scenarioVotes: new Map(),
@@ -161,6 +191,62 @@ export class MemorySessionStore implements SessionStore {
     }
     session.history.push(msg);
     session.lastActivityAt = Date.now();
+    session.gameState.conversationHistory = [...session.history];
+  }
+
+  updateGameState(
+    id: string,
+    updates: Partial<Omit<GameState, 'conversationHistory'>>,
+  ): void {
+    const session = this.sessions.get(id);
+    if (!session) {
+      throw new Error(`Session not found: ${id}`);
+    }
+
+    const gameState = session.gameState;
+
+    if (updates.currentRoomId !== undefined) {
+      gameState.currentRoomId = updates.currentRoomId;
+      if (!gameState.visitedRooms.includes(updates.currentRoomId)) {
+        gameState.visitedRooms = [...gameState.visitedRooms, updates.currentRoomId];
+      }
+    }
+
+    if (updates.inventory !== undefined) {
+      gameState.inventory = [...updates.inventory];
+    }
+
+    if (updates.visitedRooms !== undefined) {
+      gameState.visitedRooms = [...updates.visitedRooms];
+    }
+
+    if (updates.isGameOver !== undefined) {
+      gameState.isGameOver = updates.isGameOver;
+    }
+
+    if (updates.status !== undefined) {
+      gameState.status = updates.status;
+    }
+
+    if (updates.turnCount !== undefined) {
+      gameState.turnCount = updates.turnCount;
+    }
+
+    if (updates.discoveredEvidence !== undefined) {
+      gameState.discoveredEvidence = [...updates.discoveredEvidence];
+    }
+
+    if (updates.endReason !== undefined) {
+      gameState.endReason = updates.endReason;
+    }
+  }
+
+  async hydrate(): Promise<void> {
+    // no-op for memory store
+  }
+
+  async sync(_sessionId: string): Promise<void> {
+    // no-op for memory store
   }
 
   delete(id: string): void {
@@ -172,7 +258,7 @@ export class MemorySessionStore implements SessionStore {
   }
 
   /** Start the periodic cleanup timer if not already running */
-  private startCleanupIfNeeded(): void {
+  protected startCleanupIfNeeded(): void {
     if (this.cleanupTimer) return;
     this.cleanupTimer = setInterval(() => {
       const now = Date.now();
@@ -290,4 +376,174 @@ export function serializeVotes(
     result[scenarioId] = names;
   }
   return result;
+}
+
+interface StoredSessionData {
+  id: string;
+  scenarioId: string;
+  roomCode?: string;
+  history: MultiplayerChatMessage[];
+  createdAt: number;
+  lastActivityAt: number;
+  gameState: GameState;
+  players: PlayerData[];
+  actionQueue: PlayerAction[];
+  maxPlayers: number;
+  state: 'lobby' | 'voting' | 'playing' | 'ended';
+  isStreaming: boolean;
+  selectedScenarioId: string | null;
+  scenarioVotes: Record<string, string[]>;
+  commHistory: CommMessageDTO[];
+  worldStateLog: string[];
+  worldStateEvents: WorldStateEvent[];
+  objectStates: Record<string, Record<string, boolean>>;
+}
+
+function serializeSession(session: SessionData): StoredSessionData {
+  return {
+    id: session.id,
+    scenarioId: session.scenarioId,
+    roomCode: session.roomCode,
+    history: session.history,
+    createdAt: session.createdAt,
+    lastActivityAt: session.lastActivityAt,
+    gameState: session.gameState,
+    players: Array.from(session.players.values()),
+    actionQueue: session.actionQueue,
+    maxPlayers: session.maxPlayers,
+    state: session.state,
+    isStreaming: session.isStreaming,
+    selectedScenarioId: session.selectedScenarioId,
+    scenarioVotes: Object.fromEntries(
+      Array.from(session.scenarioVotes.entries()).map(([key, value]) => [key, [...value]]),
+    ),
+    commHistory: session.commHistory,
+    worldStateLog: session.worldStateLog,
+    worldStateEvents: session.worldStateEvents,
+    objectStates: Object.fromEntries(session.objectStates.entries()),
+  };
+}
+
+function deserializeSession(data: StoredSessionData): SessionData {
+  return {
+    id: data.id,
+    scenarioId: data.scenarioId,
+    roomCode: data.roomCode,
+    history: data.history || [],
+    createdAt: data.createdAt,
+    lastActivityAt: data.lastActivityAt,
+    gameState: data.gameState,
+    players: new Map((data.players || []).map((player) => [player.id, player])),
+    actionQueue: data.actionQueue || [],
+    maxPlayers: data.maxPlayers,
+    state: data.state,
+    isStreaming: data.isStreaming,
+    selectedScenarioId: data.selectedScenarioId ?? null,
+    scenarioVotes: new Map(
+      Object.entries(data.scenarioVotes || {}).map(([key, value]) => [key, new Set(value)]),
+    ),
+    commHistory: data.commHistory || [],
+    worldStateLog: data.worldStateLog || [],
+    worldStateEvents: data.worldStateEvents || [],
+    objectStates: new Map(Object.entries(data.objectStates || {})),
+  };
+}
+
+export class FirestoreSessionStore extends MemorySessionStore {
+  private db = (() => {
+    if (getApps().length === 0) {
+      initializeApp({
+        credential: applicationDefault(),
+        projectId: process.env.FIREBASE_PROJECT_ID,
+      });
+    }
+    const firestore = getFirestore();
+    firestore.settings({ ignoreUndefinedProperties: true });
+    return firestore;
+  })();
+
+  private collectionName = 'sessions';
+
+  async hydrate(): Promise<void> {
+    const snapshot = await this.db.collection(this.collectionName).get();
+    this.sessions.clear();
+    this.roomCodeIndex.clear();
+
+    snapshot.forEach((doc) => {
+      const session = deserializeSession(doc.data() as StoredSessionData);
+      this.sessions.set(session.id, session);
+      if (session.roomCode) {
+        this.roomCodeIndex.set(session.roomCode, session.id);
+      }
+    });
+
+    if (this.sessions.size > 0) {
+      this.startCleanupIfNeeded();
+    }
+  }
+
+  async sync(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      await this.db.collection(this.collectionName).doc(sessionId).delete().catch(() => {});
+      return;
+    }
+
+    await this.db.collection(this.collectionName).doc(sessionId).set(serializeSession(session));
+  }
+
+  override create(
+    scenarioId: string,
+    maxPlayers: number = 4,
+    roomCode?: string,
+    startRoomId: string = 'start',
+  ): SessionData {
+    const session = super.create(scenarioId, maxPlayers, roomCode, startRoomId);
+    void this.sync(session.id);
+    return session;
+  }
+
+  override addMessage(id: string, msg: MultiplayerChatMessage): void {
+    super.addMessage(id, msg);
+    void this.sync(id);
+  }
+
+  override updateGameState(
+    id: string,
+    updates: Partial<Omit<GameState, 'conversationHistory'>>,
+  ): void {
+    super.updateGameState(id, updates);
+    void this.sync(id);
+  }
+
+  override delete(id: string): void {
+    super.delete(id);
+    void this.sync(id);
+  }
+
+  override addPlayer(sessionId: string, player: PlayerData): void {
+    super.addPlayer(sessionId, player);
+    void this.sync(sessionId);
+  }
+
+  override removePlayer(sessionId: string, playerId: string): void {
+    super.removePlayer(sessionId, playerId);
+    void this.sync(sessionId);
+  }
+
+  override updatePlayer(sessionId: string, playerId: string, updates: Partial<PlayerData>): void {
+    super.updatePlayer(sessionId, playerId, updates);
+    void this.sync(sessionId);
+  }
+
+  override queueAction(sessionId: string, action: PlayerAction): void {
+    super.queueAction(sessionId, action);
+    void this.sync(sessionId);
+  }
+
+  override drainActionQueue(sessionId: string): PlayerAction[] {
+    const actions = super.drainActionQueue(sessionId);
+    void this.sync(sessionId);
+    return actions;
+  }
 }

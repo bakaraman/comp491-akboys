@@ -21,9 +21,9 @@ export type {
   PlayerColor,
   MultiplayerChatMessage,
   WorldStateEvent,
-} from './game';
+} from './game.js';
 
-export { PLAYER_COLORS } from './game';
+export { PLAYER_COLORS } from './game.js';
 
 export type {
   PlayerDataDTO,
@@ -31,6 +31,6 @@ export type {
   SessionStateDTO,
   ClientToServerEvents,
   ServerToClientEvents,
-} from './socket-events';
+} from './socket-events.js';
 
-export { toPlayerDTO } from './socket-events';
+export { toPlayerDTO } from './socket-events.js';
