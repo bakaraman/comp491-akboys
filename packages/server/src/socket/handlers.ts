@@ -338,10 +338,13 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         });
       }
 
+      void store.sync(sessionId);
+
       console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
     }
 
     session.isStreaming = false;
+    void store.sync(sessionId);
   });
 
   io.on('connection', (socket: GameSocket) => {
@@ -416,6 +419,8 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           commHistory: filterCommHistoryForPlayer(session, playerId),
         },
       });
+
+      void store.sync(sessionId);
 
       console.log(`[socket] ${trimmedName} joined session ${sessionId.slice(0, 8)} (${session.players.size}/${session.maxPlayers})`);
     });
@@ -510,6 +515,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // Store in comm history
       session.commHistory.push(msg);
       session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
 
       // Send to audience sockets
       const targetSids = new Set<string>();
@@ -555,6 +561,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // Store in comm history
       session.commHistory.push(msg);
       session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
 
       // Send to sender + target only
       const targetSids = new Set<string>();
@@ -582,6 +589,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       session.selectedScenarioId = scenarioId;
       session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
 
       io.to(sessionId).emit('scenario:updated', {
         selectedScenarioId: session.selectedScenarioId,
@@ -610,6 +618,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       }
 
       session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
 
       io.to(sessionId).emit('scenario:updated', {
         selectedScenarioId: session.selectedScenarioId,
@@ -632,6 +641,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       session.scenarioId = scenarioId;
       session.selectedScenarioId = scenarioId;
       session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
       callback({ success: true });
     });
 
@@ -652,6 +662,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       if (firstPlayer.id !== playerId) { callback({ success: false, error: 'Only the host can start the game' }); return; }
 
       session.state = 'playing';
+      void store.sync(sessionId);
       callback({ success: true });
 
       const scenario = SCENARIOS[session.scenarioId];
@@ -703,6 +714,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       io.to(sessionId).emit('narrator:done', { fullText: cleanText, suggestions });
       session.isStreaming = false;
+      void store.sync(sessionId);
 
       console.log(`[game:start] opening narration complete for session ${sessionId.slice(0, 8)}`);
     });
@@ -743,6 +755,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       });
 
       callback({ success: true });
+      void store.sync(sessionId);
 
       socket.to(sessionId).emit('player:reconnected', {
         playerId,
