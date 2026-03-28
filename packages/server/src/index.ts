@@ -19,13 +19,22 @@ config({ path: resolve(__dirname, '../../../.env') });
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { Server } from 'socket.io';
-import { chatRouter, store } from './routes/chat.js';
+import { chatRouter, store, storeReady } from './routes/chat.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
-const CORS_ORIGIN = 'http://localhost:3000';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
+
+if (process.env.FIREBASE_PROJECT_ID && getApps().length === 0) {
+  initializeApp({
+    credential: applicationDefault(),
+    projectId: process.env.FIREBASE_PROJECT_ID,
+  });
+  console.log('[firebase] Admin SDK initialized');
+}
 
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
@@ -50,6 +59,8 @@ const io = new Server(server, {
 });
 
 registerSocketHandlers(io, store);
+
+await storeReady;
 
 server.listen(PORT, () => {
   console.log(`[server] running on http://localhost:${PORT}`);
