@@ -11,8 +11,10 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AuthGuard } from '@/components/AuthGuard';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { ProfileButton } from '@/components/ProfileButton';
+import { getAuthHeaders } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -33,7 +35,10 @@ export default function MultiplayerPage() {
     try {
       const res = await fetch(`${API_BASE}/api/chat/new`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await getAuthHeaders()),
+        },
         body: JSON.stringify({ mode: 'multiplayer', maxPlayers }),
       });
       const data = await res.json();
@@ -56,7 +61,9 @@ export default function MultiplayerPage() {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/room/${code}`);
+      const res = await fetch(`${API_BASE}/api/chat/room/${code}`, {
+        headers: await getAuthHeaders(),
+      });
       if (!res.ok) {
         setError('Room not found. Check the code and try again.');
         setIsLoading(false);
@@ -73,6 +80,7 @@ export default function MultiplayerPage() {
   }
 
   return (
+    <AuthGuard>
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
@@ -337,5 +345,6 @@ export default function MultiplayerPage() {
         )}
       </div>
     </div>
+    </AuthGuard>
   );
 }

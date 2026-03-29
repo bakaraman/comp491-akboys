@@ -12,8 +12,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AuthGuard } from '@/components/AuthGuard';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { ProfileButton } from '@/components/ProfileButton';
+import { getAuthHeaders } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -41,10 +43,17 @@ export default function SinglePlayerPage() {
   const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/chat/scenarios`)
-      .then((r) => r.json())
-      .then((data) => setScenarios(data.scenarios || []))
-      .catch(() => {});
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/scenarios`, {
+          headers: await getAuthHeaders(),
+        });
+        const data = await res.json();
+        setScenarios(data.scenarios || []);
+      } catch {
+        // ignore bootstrap fetch errors
+      }
+    })();
   }, []);
 
   async function handleStart() {
@@ -54,7 +63,10 @@ export default function SinglePlayerPage() {
     try {
       const res = await fetch(`${API_BASE}/api/chat/new`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await getAuthHeaders()),
+        },
         body: JSON.stringify({ scenarioId: selected, mode: 'singleplayer' }),
       });
       const data = await res.json();
@@ -69,6 +81,7 @@ export default function SinglePlayerPage() {
   const selectedScenario = scenarios.find((s) => s.id === selected);
 
   return (
+    <AuthGuard>
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', backgroundColor: '#0a0a0a',
@@ -195,5 +208,6 @@ export default function SinglePlayerPage() {
         )}
       </div>
     </div>
+    </AuthGuard>
   );
 }
