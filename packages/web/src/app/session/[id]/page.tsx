@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback, use } from 'react';
+import type { GameState } from '@akboys/shared';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInput } from '@/components/ChatInput';
 import { PlayerSidebar } from '@/components/PlayerSidebar';
@@ -21,6 +22,7 @@ import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
+import { authEnabled, getAuthHeaders, subscribeToAuth } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -41,6 +43,12 @@ interface SessionInfo {
   state: string;
   maxPlayers: number;
   players: Array<{ id: string; name: string; color: string; isConnected: boolean }>;
+  gameState?: GameState;
+  scenarioMeta?: {
+    maxTurns: number;
+    npcs: Array<{ id: string; name: string }>;
+    evidenceItems: Array<{ id: string; name: string }>;
+  } | null;
 }
 
 interface ScenarioInfo {
@@ -54,7 +62,12 @@ interface ScenarioInfo {
 /*  SSE helpers (single player)                                        */
 /* ------------------------------------------------------------------ */
 
-interface SPMessage { role: 'user' | 'assistant'; content: string; }
+interface SPMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  imageUrl?: string;
+  isLoadingImage?: boolean;
+}
 
 async function consumeStream(
   response: Response,
@@ -88,12 +101,24 @@ async function fetchSuggestions(sessionId: string): Promise<string[]> {
   try {
     const res = await fetch(`${API_BASE}/api/chat/suggestions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
       body: JSON.stringify({ sessionId }),
     });
     const data = await res.json();
     return data.suggestions || [];
   } catch { return []; }
+}
+
+async function fetchGameState(sessionId: string): Promise<GameState | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/session/${sessionId}/gamestate`, {
+      headers: await getAuthHeaders(),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -102,19 +127,43 @@ async function fetchSuggestions(sessionId: string): Promise<string[]> {
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = use(params);
+  const [authReady, setAuthReady] = useState(!authEnabled());
+
+  useEffect(() => {
+    if (!authEnabled()) return;
+    const unsubscribe = subscribeToAuth((user) => {
+      if (user) {
+        setAuthReady(true);
+      } else {
+        window.location.href = '/login';
+      }
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
 
   /* ---- Session info from REST API ---- */
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const [fetchError, setFetchError] = useState(false);
 
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
-    fetch(`${API_BASE}/api/chat/session/${sessionId}`)
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((data) => { if (!cancelled) setSessionInfo(data); })
-      .catch(() => { if (!cancelled) setFetchError(true); });
+    (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
+          headers: await getAuthHeaders(),
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!cancelled) setSessionInfo(data);
+      } catch {
+        if (!cancelled) setFetchError(true);
+      }
+    })();
     return () => { cancelled = true; };
-  }, [sessionId]);
+  }, [authReady, sessionId]);
 
   const isMultiplayer = sessionInfo ? sessionInfo.maxPlayers > 1 : false;
 
@@ -129,6 +178,54 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [spLoading, setSpLoading] = useState(false);
   const [spSuggestions, setSpSuggestions] = useState<string[]>([]);
   const [spInitialized, setSpInitialized] = useState(false);
+  const [spGameState, setSpGameState] = useState<GameState | null>(null);
+  const [isAccuseOpen, setIsAccuseOpen] = useState(false);
+  const [selectedSuspect, setSelectedSuspect] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState('');
+  const [spStatusMessage, setSpStatusMessage] = useState<string | null>(null);
+
+  const attachSceneImage = useCallback(async (text: string, messageIndex: number) => {
+    const roomMatch = text.match(/##\s+\**([^\n*]+)\**/);
+    if (!roomMatch) return;
+
+    const roomName = roomMatch[1].trim();
+
+    setSpMessages((prev) => {
+      const updated = [...prev];
+      if (updated[messageIndex]) {
+        updated[messageIndex] = { ...updated[messageIndex], isLoadingImage: true };
+      }
+      return updated;
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+        body: JSON.stringify({ sessionId, roomName }),
+      });
+      const data = await res.json();
+      setSpMessages((prev) => {
+        const updated = [...prev];
+        if (updated[messageIndex]) {
+          updated[messageIndex] = {
+            ...updated[messageIndex],
+            isLoadingImage: false,
+            imageUrl: data.imageUrl || undefined,
+          };
+        }
+        return updated;
+      });
+    } catch {
+      setSpMessages((prev) => {
+        const updated = [...prev];
+        if (updated[messageIndex]) {
+          updated[messageIndex] = { ...updated[messageIndex], isLoadingImage: false };
+        }
+        return updated;
+      });
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionInfo || isMultiplayer || spInitialized) return;
@@ -136,8 +233,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     let cancelled = false;
 
     async function init() {
-      const r = await fetch(`${API_BASE}/api/chat/session/${sessionId}`);
+      const r = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
+        headers: await getAuthHeaders(),
+      });
       const data = await r.json();
+      if (!cancelled) {
+        setSpGameState(data.gameState || null);
+      }
       const visible = (data.messages || []).filter(
         (m: SPMessage) => m.role !== 'user' || m.content !== 'Start the game. Describe where I am.',
       );
@@ -146,36 +248,86 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       } else {
         if (!cancelled) { setSpLoading(true); setSpMessages([{ role: 'assistant', content: '' }]); }
         const streamRes = await fetch(`${API_BASE}/api/chat/start`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
           body: JSON.stringify({ sessionId }),
         });
-        await consumeStream(streamRes, (text) => {
+        const fullText = await consumeStream(streamRes, (text) => {
           if (!cancelled) setSpMessages([{ role: 'assistant', content: text }]);
         });
-        if (!cancelled) { setSpLoading(false); fetchSuggestions(sessionId).then(setSpSuggestions); }
+        if (!cancelled) {
+          setSpLoading(false);
+          fetchSuggestions(sessionId).then(setSpSuggestions);
+          fetchGameState(sessionId).then(setSpGameState);
+          attachSceneImage(fullText, 0);
+        }
       }
     }
     init().catch(() => {});
     return () => { cancelled = true; };
-  }, [sessionInfo, isMultiplayer, sessionId, spInitialized]);
+  }, [attachSceneImage, sessionInfo, isMultiplayer, sessionId, spInitialized]);
 
   const spSend = useCallback(async (text: string) => {
-    if (spLoading) return;
+    if (spLoading || spGameState?.status !== 'playing') return;
     setSpMessages((prev) => [...prev, { role: 'user', content: text }]);
     setSpLoading(true); setSpSuggestions([]);
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({ sessionId, message: text }),
       });
       setSpMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
-      await consumeStream(res, (t) => {
+      const assistantIndex = spMessages.length + 1;
+      const fullText = await consumeStream(res, (t) => {
         setSpMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: t }; return u; });
       });
       fetchSuggestions(sessionId).then(setSpSuggestions);
+      fetchGameState(sessionId).then(setSpGameState);
+      attachSceneImage(fullText, assistantIndex);
     } catch { setSpMessages((prev) => [...prev, { role: 'assistant', content: 'The narrator falls silent...' }]); }
     finally { setSpLoading(false); }
-  }, [sessionId, spLoading]);
+  }, [attachSceneImage, sessionId, spGameState?.status, spLoading, spMessages.length]);
+
+  const handleAccuse = useCallback(async () => {
+    if (!selectedSuspect || !selectedEvidence) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/accuse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+        body: JSON.stringify({
+          sessionId,
+          suspectId: selectedSuspect,
+          evidenceId: selectedEvidence,
+        }),
+      });
+      const data = await res.json();
+      if (data.summary) {
+        setSpMessages((prev) => [...prev, { role: 'assistant', content: data.summary }]);
+      }
+      if (data.gameState) {
+        setSpGameState(data.gameState);
+      } else {
+        fetchGameState(sessionId).then(setSpGameState);
+      }
+      setIsAccuseOpen(false);
+      setSelectedSuspect('');
+      setSelectedEvidence('');
+    } catch {
+      setSpStatusMessage('Accusation failed. Please try again.');
+    }
+  }, [selectedEvidence, selectedSuspect, sessionId]);
+
+  const handlePlayAgain = useCallback(async () => {
+    if (!sessionInfo) return;
+    const res = await fetch(`${API_BASE}/api/chat/new`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+      body: JSON.stringify({ scenarioId: sessionInfo.scenarioId, mode: 'singleplayer' }),
+    });
+    const data = await res.json();
+    if (data.sessionId) {
+      window.location.href = `/session/${data.sessionId}`;
+    }
+  }, [sessionInfo]);
 
   /* ---- Multiplayer lobby/voting state ---- */
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -289,23 +441,70 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ================================================================ */
   if (!isMultiplayer) {
     const emoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6';
+    const turnsLeft = Math.max(
+      0,
+      (sessionInfo.scenarioMeta?.maxTurns || 0) - (spGameState?.turnCount || 0),
+    );
+    const isGameOver = spGameState?.status && spGameState.status !== 'playing';
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2520', backgroundColor: '#0d0d0d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '16px', color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
-            {emoji} {sessionInfo.scenarioTitle}
-          </span>
-          <a href="/" style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', textDecoration: 'none', letterSpacing: '1px', textTransform: 'uppercase' }}>
-            New Game
-          </a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '16px', color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+              {emoji} {sessionInfo.scenarioTitle}
+            </span>
+            {sessionInfo.scenarioMeta && (
+              <span style={{
+                padding: '4px 10px',
+                borderRadius: '999px',
+                border: '1px solid #2a2520',
+                color: turnsLeft <= 2 ? '#d46868' : '#9a9080',
+                fontSize: '11px',
+                fontFamily: 'monospace',
+                letterSpacing: '1px',
+              }}>
+                TURNS LEFT {turnsLeft}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {spGameState?.status === 'playing' && sessionInfo.scenarioMeta && (
+              <button
+                onClick={() => setIsAccuseOpen(true)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #7a3232',
+                  borderRadius: '6px',
+                  color: '#d46868',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >
+                Accuse
+              </button>
+            )}
+            <a href="/" style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', textDecoration: 'none', letterSpacing: '1px', textTransform: 'uppercase' }}>
+              New Game
+            </a>
+          </div>
         </div>
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
           {spMessages.map((msg, i) => (
-            <ChatMessage key={i} role={msg.role} content={msg.content} />
+            <ChatMessage
+              key={i}
+              role={msg.role}
+              content={msg.content}
+              imageUrl={msg.imageUrl}
+              isLoadingImage={msg.isLoadingImage}
+            />
           ))}
           {spLoading && <div style={{ color: '#4a4540', fontStyle: 'italic', fontSize: '14px', padding: '8px 0' }}>The narrator contemplates...</div>}
         </div>
-        {spSuggestions.length > 0 && !spLoading && (
+        {spSuggestions.length > 0 && !spLoading && spGameState?.status === 'playing' && (
           <div style={{ display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a' }}>
             {spSuggestions.map((s, i) => (
               <button key={i} onClick={() => spSend(s)} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '20px', color: '#b0a080', fontSize: '13px', fontFamily: 'Georgia, serif', fontStyle: 'italic', cursor: 'pointer', transition: 'all 0.2s' }}
@@ -315,7 +514,110 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             ))}
           </div>
         )}
-        <ChatInput onSend={spSend} disabled={spLoading} />
+        {spStatusMessage && (
+          <div style={{ padding: '10px 20px', color: '#cf8a8a', fontSize: '12px', fontFamily: 'monospace' }}>
+            {spStatusMessage}
+          </div>
+        )}
+        <ChatInput onSend={spSend} disabled={spLoading || isGameOver} />
+
+        {isAccuseOpen && sessionInfo.scenarioMeta && (
+          <div style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.72)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60,
+          }}>
+            <div style={{
+              width: '100%', maxWidth: '420px', backgroundColor: '#111', border: '1px solid #2a2520',
+              borderRadius: '14px', padding: '24px',
+            }}>
+              <h2 style={{ color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0 }}>
+                Final Accusation
+              </h2>
+              <p style={{ color: '#9a9080', fontSize: '14px', lineHeight: '1.6' }}>
+                Choose the culprit and the key piece of evidence. A wrong accusation ends the case badly.
+              </p>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#b0a080', fontFamily: 'monospace', fontSize: '12px' }}>
+                Suspect
+              </label>
+              <select
+                value={selectedSuspect}
+                onChange={(e) => setSelectedSuspect(e.target.value)}
+                style={{ width: '100%', marginBottom: '16px', padding: '12px', backgroundColor: '#1a1a1a', color: '#e8e0d4', border: '1px solid #2a2520', borderRadius: '8px' }}
+              >
+                <option value="">Select a suspect</option>
+                {sessionInfo.scenarioMeta.npcs.map((npc) => (
+                  <option key={npc.id} value={npc.id}>{npc.name}</option>
+                ))}
+              </select>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#b0a080', fontFamily: 'monospace', fontSize: '12px' }}>
+                Evidence
+              </label>
+              <select
+                value={selectedEvidence}
+                onChange={(e) => setSelectedEvidence(e.target.value)}
+                style={{ width: '100%', marginBottom: '20px', padding: '12px', backgroundColor: '#1a1a1a', color: '#e8e0d4', border: '1px solid #2a2520', borderRadius: '8px' }}
+              >
+                <option value="">Select evidence</option>
+                {sessionInfo.scenarioMeta.evidenceItems.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  onClick={() => setIsAccuseOpen(false)}
+                  style={{ padding: '10px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#6a6050', fontFamily: 'monospace', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAccuse}
+                  disabled={!selectedSuspect || !selectedEvidence}
+                  style={{ padding: '10px 16px', backgroundColor: '#d4a843', border: 'none', borderRadius: '8px', color: '#0a0a0a', fontFamily: 'monospace', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isGameOver && (
+          <div style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.82)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+          }}>
+            <div style={{ textAlign: 'center', maxWidth: '480px', padding: '24px' }}>
+              <h1 style={{
+                color: spGameState?.status === 'won' ? '#d4a843' : '#d46868',
+                fontFamily: 'Georgia, serif',
+                fontStyle: 'italic',
+                fontSize: '40px',
+                marginBottom: '10px',
+              }}>
+                {spGameState?.status === 'won' ? 'Mystery Solved' : 'Game Over'}
+              </h1>
+              <p style={{ color: '#9a9080', fontFamily: 'Georgia, serif', fontSize: '16px', lineHeight: '1.7', marginBottom: '24px' }}>
+                {spGameState?.endReason === 'solved' && 'You found the truth and closed the case.'}
+                {spGameState?.endReason === 'wrong_accusation' && 'The accusation was wrong. The case slipped through your hands.'}
+                {spGameState?.endReason === 'turn_limit' && 'Time ran out before the case could be solved.'}
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                <a
+                  href="/"
+                  style={{ padding: '12px 18px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#b0a080', textDecoration: 'none', fontFamily: 'monospace' }}
+                >
+                  Home
+                </a>
+                <button
+                  onClick={handlePlayAgain}
+                  style={{ padding: '12px 18px', backgroundColor: '#d4a843', border: 'none', borderRadius: '8px', color: '#0a0a0a', fontFamily: 'monospace', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  Play Again
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

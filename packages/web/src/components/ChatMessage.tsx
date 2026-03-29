@@ -18,9 +18,18 @@ interface ChatMessageProps {
   content: string;
   playerName?: string;
   playerColor?: string;
+  imageUrl?: string;
+  isLoadingImage?: boolean;
 }
 
-export function ChatMessage({ role, content, playerName, playerColor }: ChatMessageProps) {
+export function ChatMessage({
+  role,
+  content,
+  playerName,
+  playerColor,
+  imageUrl,
+  isLoadingImage,
+}: ChatMessageProps) {
   /* ---- Observed messages (what you see others doing) ---- */
   if (role === 'observed') {
     return (
@@ -105,6 +114,7 @@ export function ChatMessage({ role, content, playerName, playerColor }: ChatMess
         color: isNarrator ? '#e8e0d4' : displayColor,
         fontSize: '15px',
         lineHeight: '1.7',
+        overflow: 'hidden',
       }}>
         <div style={{
           fontSize: '11px',
@@ -132,6 +142,51 @@ export function ChatMessage({ role, content, playerName, playerColor }: ChatMess
             </>
           )}
         </div>
+
+        {isLoadingImage && (
+          <div style={{
+            width: '100%',
+            maxWidth: '320px',
+            aspectRatio: '1 / 1',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            border: '1px dashed #2a2520',
+            backgroundColor: '#0d0d0d',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#6a6050',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            fontStyle: 'italic',
+          }}>
+            Visualizing scene...
+          </div>
+        )}
+
+        {imageUrl && !isLoadingImage && (
+          <div style={{
+            width: '100%',
+            maxWidth: '320px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            border: '1px solid #2a2520',
+          }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageUrl}
+              alt="Scene visualization"
+              style={{
+                display: 'block',
+                width: '100%',
+                aspectRatio: '1 / 1',
+                objectFit: 'cover',
+              }}
+            />
+          </div>
+        )}
+
         <div className="markdown-content">
           <Markdown
             components={{
