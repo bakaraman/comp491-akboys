@@ -7,5 +7,5 @@
  * @since 2026-03-12
  */
 
-export * from './types';
-export * from './constants';
+export * from './types/index.js';
+export * from './constants/index.js';

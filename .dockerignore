@@ -1,0 +1,9 @@
+node_modules
+packages/*/node_modules
+packages/*/.next
+packages/*/dist
+.git
+.gitignore
+docs
+firebase-debug.log
+.playwright-cli

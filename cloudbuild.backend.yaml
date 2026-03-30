@@ -1,0 +1,12 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - packages/server/Dockerfile
+      - -t
+      - europe-west1-docker.pkg.dev/lodos-prod/cloud-run-source-deploy/comp491-akboys-backend:latest
+      - .
+
+images:
+  - europe-west1-docker.pkg.dev/lodos-prod/cloud-run-source-deploy/comp491-akboys-backend:latest
