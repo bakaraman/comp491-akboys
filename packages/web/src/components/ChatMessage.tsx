@@ -1,8 +1,8 @@
 /**
- * ChatMessage.tsx — Single chat message bubble component
+ * ChatMessage.tsx — Chat message bubble component
  *
- * Renders a message from either the player or the narrator
- * with distinct styling for each role. Supports markdown.
+ * Renders messages from the narrator, players, or system (join/leave).
+ * Supports markdown rendering and player name/color display.
  *
  * @author AK Boys Team
  * @since 2026-03-12
@@ -14,12 +14,79 @@ import React from 'react';
 import Markdown from 'react-markdown';
 
 interface ChatMessageProps {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system' | 'observed';
   content: string;
+  playerName?: string;
+  playerColor?: string;
 }
 
-export function ChatMessage({ role, content }: ChatMessageProps) {
+export function ChatMessage({ role, content, playerName, playerColor }: ChatMessageProps) {
+  /* ---- Observed messages (what you see others doing) ---- */
+  if (role === 'observed') {
+    return (
+      <div style={{
+        padding: '8px 0', marginBottom: '10px',
+      }}>
+        <div style={{
+          padding: '10px 16px',
+          backgroundColor: '#12120f',
+          border: '1px solid #1e1e1a',
+          borderRadius: '8px',
+          borderLeft: '3px solid #6a6050',
+        }}>
+          <div style={{
+            fontSize: '10px', color: '#5a5545',
+            fontFamily: 'monospace', textTransform: 'uppercase',
+            letterSpacing: '1px', marginBottom: '4px',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6a6050" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Observed
+          </div>
+          <div style={{
+            fontSize: '14px', color: '#8a8070',
+            fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            lineHeight: '1.6',
+          }}>
+            {content}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---- System messages (join/leave/reconnect) ---- */
+  if (role === 'system') {
+    return (
+      <div style={{
+        textAlign: 'center',
+        padding: '6px 0',
+        marginBottom: '8px',
+      }}>
+        <span style={{
+          fontSize: '12px',
+          color: '#6a6050',
+          fontFamily: 'monospace',
+          letterSpacing: '0.5px',
+        }}>
+          <Markdown
+            components={{
+              p: ({ children }) => <span>{children}</span>,
+              strong: ({ children }) => <strong style={{ color: '#8a7a60' }}>{children}</strong>,
+            }}
+          >
+            {content}
+          </Markdown>
+        </span>
+      </div>
+    );
+  }
+
   const isNarrator = role === 'assistant';
+  const displayColor = playerColor || '#d4a843';
 
   return (
     <div style={{
@@ -35,7 +102,7 @@ export function ChatMessage({ role, content }: ChatMessageProps) {
         borderRadius: isNarrator ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
         backgroundColor: isNarrator ? '#1a1a1a' : '#2a2010',
         border: `1px solid ${isNarrator ? '#2a2520' : '#3a3020'}`,
-        color: isNarrator ? '#e8e0d4' : '#d4a843',
+        color: isNarrator ? '#e8e0d4' : displayColor,
         fontSize: '15px',
         lineHeight: '1.7',
       }}>
@@ -43,11 +110,27 @@ export function ChatMessage({ role, content }: ChatMessageProps) {
           fontSize: '11px',
           textTransform: 'uppercase',
           letterSpacing: '1.5px',
-          color: isNarrator ? '#6a6050' : '#8a7030',
+          color: isNarrator ? '#6a6050' : displayColor,
           marginBottom: '8px',
           fontFamily: 'monospace',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
         }}>
-          {isNarrator ? 'Narrator' : 'You'}
+          {isNarrator ? (
+            'Narrator'
+          ) : (
+            <>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: displayColor,
+                display: 'inline-block',
+              }} />
+              {playerName || 'Player'}
+            </>
+          )}
         </div>
         <div className="markdown-content">
           <Markdown

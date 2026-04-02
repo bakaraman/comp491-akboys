@@ -49,3 +49,10 @@ html, body {
   background: var(--border-dark);
   border-radius: 3px;
 }
+
+/* Mobile adjustments */
+@media (max-width: 640px) {
+  html, body {
+    font-size: 14px;
+  }
+}

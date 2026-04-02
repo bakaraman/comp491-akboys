@@ -1,7 +1,8 @@
 /**
- * page.tsx — Home page with scenario picker
+ * page.tsx — Main menu: choose Single Player or Multiplayer
  *
- * Player picks a story, session is created, then redirected to /session/[uuid].
+ * Landing page with two mode cards. Shows a name popup on first visit.
+ * Profile button in top-right to change name anytime.
  *
  * @author AK Boys Team
  * @since 2026-03-12
@@ -9,150 +10,152 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
-
-const API_BASE = 'http://localhost:3001/api/chat';
-
-const SCENARIO_EMOJI: Record<string, string> = {
-  noir: '🕵️',
-  haunted: '👻',
-  space: '🚀',
-  pirate: '🏴‍☠️',
-  western: '🤠',
-  cyberpunk: '🌃',
-};
-
-interface ScenarioInfo {
-  id: string;
-  title: string;
-  setting: string;
-  synopsis: string;
-}
+import { usePlayerName } from '@/hooks/usePlayerName';
+import { NamePopup } from '@/components/NamePopup';
+import { ProfileButton } from '@/components/ProfileButton';
 
 export default function HomePage() {
   const router = useRouter();
-  const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [isStarting, setIsStarting] = useState(false);
+  const { name, loaded, setName } = usePlayerName();
 
-  useEffect(() => {
-    fetch(`${API_BASE}/scenarios`)
-      .then((r) => r.json())
-      .then((data) => setScenarios(data.scenarios || []))
-      .catch(() => {});
-  }, []);
-
-  async function handleStart() {
-    if (!selected || isStarting) return;
-    setIsStarting(true);
-
-    try {
-      const res = await fetch(`${API_BASE}/new`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selected }),
-      });
-      const data = await res.json();
-      if (data.sessionId) {
-        router.push(`/session/${data.sessionId}`);
-      }
-    } catch {
-      setIsStarting(false);
-    }
-  }
-
-  const selectedScenario = scenarios.find((s) => s.id === selected);
+  // Don't render until localStorage is read
+  if (!loaded) return null;
 
   return (
     <div style={{
-      height: '100vh', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', backgroundColor: '#0a0a0a',
-      padding: '24px', overflowY: 'auto',
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: '#0a0a0a', padding: '24px',
     }}>
-      <div style={{ textAlign: 'center', maxWidth: '700px', marginTop: '48px' }}>
+      {/* First-time name popup */}
+      {!name && (
+        <NamePopup onSave={setName} />
+      )}
+
+      {/* Profile button (only when name is set) */}
+      {name && (
+        <ProfileButton name={name} onNameChange={setName} />
+      )}
+
+      <div style={{ textAlign: 'center', maxWidth: '600px', width: '100%' }}>
+        {/* Title */}
         <h1 style={{
-          fontSize: '36px', color: '#d4a843', fontFamily: 'Georgia, serif',
-          fontWeight: 'normal', fontStyle: 'italic', marginBottom: '8px',
+          fontSize: '42px', color: '#d4a843',
+          fontFamily: 'Georgia, serif', fontStyle: 'italic',
+          fontWeight: 'normal', marginBottom: '8px',
+          letterSpacing: '-0.5px',
         }}>
-          Choose Your Story
+          The Velvet Shadow
         </h1>
         <p style={{
-          fontSize: '14px', color: '#6a6050', fontFamily: 'monospace',
-          letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '32px',
+          fontSize: '13px', color: '#5a5545',
+          fontFamily: 'monospace', letterSpacing: '3px',
+          textTransform: 'uppercase', marginBottom: '48px',
         }}>
           AI-Powered Text Adventure
         </p>
 
-        {/* Scenario cards */}
+        {/* Mode cards */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: '12px', marginBottom: '32px', textAlign: 'left',
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: '16px', marginBottom: '48px',
         }}>
-          {scenarios.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSelected(s.id)}
-              style={{
-                padding: '16px',
-                backgroundColor: selected === s.id ? '#1a1510' : '#111',
-                border: `2px solid ${selected === s.id ? '#d4a843' : '#1a1a1a'}`,
-                borderRadius: '12px', cursor: 'pointer',
-                textAlign: 'left', transition: 'all 0.2s',
-              }}
-            >
-              <div style={{ fontSize: '28px', marginBottom: '8px' }}>
-                {SCENARIO_EMOJI[s.id] || '📖'}
-              </div>
-              <div style={{
-                fontSize: '15px',
-                color: selected === s.id ? '#d4a843' : '#b0a080',
-                fontFamily: 'Georgia, serif', fontWeight: 'bold', marginBottom: '4px',
-              }}>
-                {s.title}
-              </div>
-              <div style={{
-                fontSize: '12px', color: '#6a6050',
-                fontFamily: 'monospace', lineHeight: '1.4',
-              }}>
-                {s.setting}
-              </div>
-            </button>
-          ))}
+          {/* Single Player */}
+          <button
+            onClick={() => router.push('/singleplayer')}
+            style={{
+              padding: '36px 24px',
+              backgroundColor: '#111',
+              border: '1px solid #1e1e1e',
+              borderRadius: '14px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#d4a843';
+              e.currentTarget.style.backgroundColor = '#141210';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#1e1e1e';
+              e.currentTarget.style.backgroundColor = '#111';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: '36px', marginBottom: '14px' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4a843" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+            <div style={{
+              fontSize: '18px', color: '#e8e0d4',
+              fontFamily: 'Georgia, serif', fontWeight: 'bold',
+              marginBottom: '8px',
+            }}>
+              Single Player
+            </div>
+            <div style={{
+              fontSize: '12px', color: '#5a5545',
+              fontFamily: 'monospace', lineHeight: '1.5',
+            }}>
+              Solo adventure with the AI narrator
+            </div>
+          </button>
+
+          {/* Multiplayer */}
+          <button
+            onClick={() => router.push('/multiplayer')}
+            style={{
+              padding: '36px 24px',
+              backgroundColor: '#111',
+              border: '1px solid #1e1e1e',
+              borderRadius: '14px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#d4a843';
+              e.currentTarget.style.backgroundColor = '#141210';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#1e1e1e';
+              e.currentTarget.style.backgroundColor = '#111';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: '36px', marginBottom: '14px' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4a843" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <div style={{
+              fontSize: '18px', color: '#e8e0d4',
+              fontFamily: 'Georgia, serif', fontWeight: 'bold',
+              marginBottom: '8px',
+            }}>
+              Multiplayer
+            </div>
+            <div style={{
+              fontSize: '12px', color: '#5a5545',
+              fontFamily: 'monospace', lineHeight: '1.5',
+            }}>
+              Play with 2-4 friends in real-time
+            </div>
+          </button>
         </div>
 
-        {/* Selected scenario detail + start button */}
-        {selectedScenario && (
-          <div style={{ marginBottom: '32px' }}>
-            <p style={{
-              fontSize: '15px', color: '#9a9080', lineHeight: '1.8',
-              marginBottom: '24px', fontFamily: 'Georgia, serif', fontStyle: 'italic',
-            }}>
-              {selectedScenario.synopsis}
-            </p>
-            <button
-              onClick={handleStart}
-              disabled={isStarting}
-              style={{
-                padding: '16px 48px',
-                backgroundColor: isStarting ? '#2a2010' : '#d4a843',
-                color: isStarting ? '#5a5040' : '#0a0a0a',
-                border: 'none', borderRadius: '8px', fontSize: '16px',
-                fontWeight: 'bold', fontFamily: 'monospace',
-                letterSpacing: '2px', textTransform: 'uppercase',
-                cursor: isStarting ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              {isStarting ? 'Starting...' : 'Begin'}
-            </button>
-          </div>
-        )}
-
         <p style={{
-          marginTop: '32px', fontSize: '12px',
-          color: '#3a3530', fontFamily: 'monospace',
+          fontSize: '11px', color: '#2a2520',
+          fontFamily: 'monospace',
         }}>
           COMP 491 — AK Boys — Spring 2026
         </p>

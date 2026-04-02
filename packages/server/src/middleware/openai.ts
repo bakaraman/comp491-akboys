@@ -18,7 +18,7 @@ import type { ChatMessage } from '@akboys/shared';
  * gpt-4o-mini  : fast, cheap, good for dev/testing
  */
 const MODEL = 'gpt-5.4';
-const MAX_TOKENS = 500;
+const MAX_TOKENS = 800;
 const TEMPERATURE = 0.85;
 
 let _client: OpenAI | null = null;
@@ -47,6 +47,7 @@ function buildMessages(
 /**
  * Stream narrator response as an async generator of text chunks.
  * Each yield is a small piece of text as it arrives from OpenAI.
+ * Used for opening narration (unstructured, broadcast to all).
  */
 export async function* narratorChatStream(
   systemPrompt: string,
@@ -65,6 +66,87 @@ export async function* narratorChatStream(
     if (delta) {
       yield delta;
     }
+  }
+}
+
+/**
+ * Structured narrator response — returns JSON with guaranteed schema.
+ * Used for per-player action responses where we need [RESPONSE]/[OBSERVED]/directives.
+ *
+ * Returns parsed JSON or null on failure.
+ */
+export interface StructuredNarratorResponse {
+  response: string;
+  observed: string;
+  directives: Array<{ type: string; player: string; target: string }>;
+}
+
+export async function narratorStructuredResponse(
+  systemPrompt: string,
+  history: ChatMessage[],
+): Promise<StructuredNarratorResponse | null> {
+  try {
+    const completion = await getClient().chat.completions.create({
+      model: MODEL,
+      messages: buildMessages(systemPrompt, history),
+      max_completion_tokens: MAX_TOKENS,
+      temperature: TEMPERATURE,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'narrator_response',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              response: {
+                type: 'string',
+                description: 'Detailed second-person narrator response for the acting player. Use markdown formatting.',
+              },
+              observed: {
+                type: 'string',
+                description: 'Brief third-person sentence of what nearby players observe. No secrets or details.',
+              },
+              directives: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', description: 'MOVE, PICKUP, OPEN, CLOSE, UNLOCK, BREAK, REVEAL, USE, REMOVE, or STATE' },
+                    player: { type: 'string', description: 'Player name' },
+                    target: { type: 'string', description: 'Room ID, item ID, or state change description' },
+                  },
+                  required: ['type', 'player', 'target'],
+                  additionalProperties: false,
+                },
+                description: 'State change directives. Only include if something changed.',
+              },
+            },
+            required: ['response', 'observed', 'directives'],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+
+    // Validate shape
+    if (
+      typeof parsed.response === 'string' &&
+      typeof parsed.observed === 'string' &&
+      Array.isArray(parsed.directives)
+    ) {
+      return parsed as StructuredNarratorResponse;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[openai] structured response error:', err);
+    return null;
   }
 }
 
