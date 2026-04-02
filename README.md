@@ -23,6 +23,9 @@ An AI-powered text adventure game where a large language model narrates interact
 | Backend | Express.js, TypeScript |
 | AI (Narrator) | OpenAI GPT-5.4 (streaming, SSE) |
 | AI (Suggestions) | OpenAI GPT-5-nano (minimal reasoning) |
+| Database | Firestore-backed session persistence |
+| Realtime | Socket.IO |
+| Auth | Firebase Auth |
 | Markdown | react-markdown |
 | Monorepo | npm workspaces |
 
@@ -94,6 +97,10 @@ npm run dev:local
 | POST | `/api/chat/start` | Stream the opening narration |
 | POST | `/api/chat` | Send a message, stream narrator response |
 | GET | `/api/chat/session/:id` | Get session info + message history |
+| GET | `/api/chat/session/:id/gamestate` | Get current game state |
+| GET | `/api/chat/room/:code` | Resolve multiplayer room code |
+| POST | `/api/chat/image` | Generate or fetch a cached scene image |
+| POST | `/api/chat/accuse` | Submit a final accusation in single-player |
 | POST | `/api/chat/suggestions` | Get 3 follow-up action suggestions |
 
 ## Available Scenarios
@@ -110,15 +117,25 @@ npm run dev:local
 ## Architecture
 
 ```
-Browser ──► Next.js (3000) ──► Express (3001) ──► OpenAI API
+Browser ──► Next.js (3000) ──► Express + Socket.IO (3001) ──► OpenAI API
                                      │
-                              SessionStore (in-memory)
-                              (swap to Firestore later)
+                                     ├── Firestore session persistence
+                                     └── Firebase Auth token verification
 ```
 
-- **SessionStore interface** makes database migration easy — just implement `FirestoreSessionStore`
-- **SSE streaming** delivers narrator text chunk-by-chunk for real-time feel
-- **Two AI models**: GPT-5.4 for quality narration, GPT-5-nano for fast suggestions
+- **SessionStore** now supports Firestore-backed persistence with restart recovery
+- **SSE streaming** powers the single-player narrator flow
+- **Socket.IO** powers multiplayer rooms, lobby state, and player-to-player sync
+- **Two AI models**: GPT-5.4 for narration, GPT-5-nano for suggestions
+
+## Deployment
+
+- **Backend service URL:** `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
+- **Cloud Run project:** `lodos-prod`
+- **Firestore/Firebase project:** `comp491-akboys-2026`
+- **Runtime deployment flow:** build Docker image with `cloudbuild.backend.yaml`, then deploy to Cloud Run with `packages/server/Dockerfile`
+- **Persistence mode:** set `SESSION_STORE=firestore`
+- **Frontend API override:** set `NEXT_PUBLIC_SERVER_URL` to the deployed backend URL
 
 ## Scripts
 
