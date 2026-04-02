@@ -21,6 +21,9 @@ Completed documents ready for submission.
 - `COMP491_Registration_Form_FILLED.docx` — Submitted registration form
 - `COMP491_Proposal_FILLED.docx` — Submitted project proposal (with Gantt chart)
 - `COMP491_Progress1.pptx` — Progress Meeting 1 presentation
+- `COMP491_Progress2.pptx` — Progress Meeting 2 presentation
+- `COMP491_Progress3.pptx` — Progress Meeting 3 presentation
+- `COMP491_Proposal_Updated_FILLED.docx` — Updated project proposal
 - `project_technical_document.docx` — Technical overview document
 
 ### `generators/`
@@ -29,6 +32,10 @@ Run these to regenerate filled documents if content changes.
 
 - `fill_proposal.py` — Fills the proposal template in-place
 - `fill_progress1.py` — Fills progress meeting 1 presentation
+- `fill_progress2.py` — Fills progress meeting 2 presentation
+- `fill_progress3.py` — Fills progress meeting 3 presentation
+- `fill_proposal_updated.py` — Generates the updated proposal document
+- `generate_architecture.py` — Generates current/final architecture diagrams
 - `generate_doc.py` — Generates technical document DOCX
 - `generate_pdf.py` — Generates technical document PDF (black background)
 - `demo_v1.py` — Original Tkinter demo (single-player noir detective game)
