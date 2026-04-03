@@ -25,6 +25,7 @@ import { NamePopup } from '@/components/NamePopup';
 import { authEnabled, getAuthHeaders, subscribeToAuth } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+const DEBUG_PREFIX = '[session]';
 
 const SCENARIO_EMOJI: Record<string, string> = {
   noir: '\uD83D\uDD75\uFE0F',
@@ -73,10 +74,22 @@ async function consumeStream(
   response: Response,
   onChunk: (text: string) => void,
 ): Promise<string> {
+  console.debug(`${DEBUG_PREFIX} stream response`, {
+    ok: response.ok,
+    status: response.status,
+    hasBody: !!response.body,
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Streaming request failed with status ${response.status}`);
+  }
+
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let chunkCount = 0;
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -87,13 +100,38 @@ async function consumeStream(
       if (!line.startsWith('data: ')) continue;
       try {
         const event = JSON.parse(line.slice(6));
-        if (event.type === 'chunk') {
+        if (event.type === 'session') {
+          console.debug(`${DEBUG_PREFIX} stream session`, event);
+        } else if (event.type === 'chunk') {
+          chunkCount += 1;
           fullText += event.content;
+          if (chunkCount <= 5 || chunkCount % 25 === 0) {
+            console.debug(`${DEBUG_PREFIX} stream chunk`, {
+              chunkCount,
+              currentLength: fullText.length,
+              preview: fullText.slice(0, 120),
+            });
+          }
+          onChunk(fullText);
+        } else if (event.type === 'done' && typeof event.content === 'string') {
+          fullText = event.content;
+          console.debug(`${DEBUG_PREFIX} stream done`, {
+            chunkCount,
+            finalLength: fullText.length,
+            gameState: event.gameState,
+          });
           onChunk(fullText);
         }
-      } catch { /* skip */ }
+      } catch (error) {
+        console.warn(`${DEBUG_PREFIX} stream parse skip`, error);
+      }
     }
   }
+
+  console.debug(`${DEBUG_PREFIX} stream finished`, {
+    chunkCount,
+    finalLength: fullText.length,
+  });
   return fullText;
 }
 
@@ -171,13 +209,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const { name: storedName, loaded: nameLoaded, setName: setStoredName } = usePlayerName();
 
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
-  const mp = useMultiplayerSession(sessionId);
+  const mp = useMultiplayerSession(sessionId, isMultiplayer);
 
   /* ---- Single player state ---- */
   const [spMessages, setSpMessages] = useState<SPMessage[]>([]);
   const [spLoading, setSpLoading] = useState(false);
   const [spSuggestions, setSpSuggestions] = useState<string[]>([]);
-  const [spInitialized, setSpInitialized] = useState(false);
   const [spGameState, setSpGameState] = useState<GameState | null>(null);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [selectedSuspect, setSelectedSuspect] = useState('');
@@ -228,33 +265,60 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionInfo || isMultiplayer || spInitialized) return;
-    setSpInitialized(true);
-    let cancelled = false;
+    if (!sessionInfo || isMultiplayer) return;
+    let active = true;
+    const controller = new AbortController();
 
     async function init() {
+      console.debug(`${DEBUG_PREFIX} init singleplayer start`, {
+        sessionId,
+        scenarioId: sessionInfo.scenarioId,
+      });
+
       const r = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
         headers: await getAuthHeaders(),
+        signal: controller.signal,
       });
       const data = await r.json();
-      if (!cancelled) {
+      console.debug(`${DEBUG_PREFIX} session payload`, {
+        sessionId,
+        messageCount: data.messages?.length || 0,
+        gameState: data.gameState,
+      });
+
+      if (active) {
         setSpGameState(data.gameState || null);
       }
       const visible = (data.messages || []).filter(
         (m: SPMessage) => m.role !== 'user' || m.content !== 'Start the game. Describe where I am.',
       );
       if (visible.length > 0) {
-        if (!cancelled) { setSpMessages(visible); fetchSuggestions(sessionId).then(setSpSuggestions); }
+        console.debug(`${DEBUG_PREFIX} reusing existing visible messages`, {
+          sessionId,
+          visibleCount: visible.length,
+        });
+        if (active) {
+          setSpMessages(visible);
+          fetchSuggestions(sessionId).then(setSpSuggestions);
+        }
       } else {
-        if (!cancelled) { setSpLoading(true); setSpMessages([{ role: 'assistant', content: '' }]); }
+        console.debug(`${DEBUG_PREFIX} no visible messages, requesting /start stream`, { sessionId });
+        if (active) {
+          setSpLoading(true);
+          setSpMessages([{ role: 'assistant', content: '' }]);
+        }
         const streamRes = await fetch(`${API_BASE}/api/chat/start`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
           body: JSON.stringify({ sessionId }),
+          signal: controller.signal,
         });
         const fullText = await consumeStream(streamRes, (text) => {
-          if (!cancelled) setSpMessages([{ role: 'assistant', content: text }]);
+          if (active) {
+            setSpMessages([{ role: 'assistant', content: text }]);
+          }
         });
-        if (!cancelled) {
+        if (active) {
           setSpLoading(false);
           fetchSuggestions(sessionId).then(setSpSuggestions);
           fetchGameState(sessionId).then(setSpGameState);
@@ -262,9 +326,32 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         }
       }
     }
-    init().catch(() => {});
-    return () => { cancelled = true; };
-  }, [attachSceneImage, sessionInfo, isMultiplayer, sessionId, spInitialized]);
+    init().catch((error) => {
+      if ((error as Error).name === 'AbortError') {
+        console.debug(`${DEBUG_PREFIX} singleplayer init aborted`, { sessionId });
+        return;
+      }
+      console.error(`${DEBUG_PREFIX} singleplayer init failed`, error);
+      if (active) {
+        setSpLoading(false);
+        setSpStatusMessage('Failed to load the session stream.');
+      }
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [attachSceneImage, sessionInfo, isMultiplayer, sessionId]);
+
+  useEffect(() => {
+    if (!sessionInfo || isMultiplayer) return;
+    console.debug(`${DEBUG_PREFIX} singleplayer state`, {
+      sessionId,
+      messageCount: spMessages.length,
+      loading: spLoading,
+      lastMessagePreview: spMessages.at(-1)?.content?.slice(0, 120),
+    });
+  }, [isMultiplayer, sessionId, sessionInfo, spLoading, spMessages]);
 
   const spSend = useCallback(async (text: string) => {
     if (spLoading || spGameState?.status !== 'playing') return;

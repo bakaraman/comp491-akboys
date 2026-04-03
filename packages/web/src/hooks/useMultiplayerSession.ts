@@ -69,7 +69,7 @@ function clearIdentity(): void {
 /*  Hook                                                               */
 /* ------------------------------------------------------------------ */
 
-export function useMultiplayerSession(sessionId: string) {
+export function useMultiplayerSession(sessionId: string, enabled: boolean = true) {
   /* ---- State ---- */
   const [players, setPlayers] = useState<PlayerDataDTO[]>([]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -113,6 +113,10 @@ export function useMultiplayerSession(sessionId: string) {
   /* ---- Socket setup & event listeners ---- */
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const socket = getSocket();
     socketRef.current = socket;
 
@@ -278,7 +282,7 @@ export function useMultiplayerSession(sessionId: string) {
       disconnectSocket();
       socketRef.current = null;
     };
-  }, [sessionId, addMessage]);
+  }, [sessionId, addMessage, enabled]);
 
   /* ---- Public actions ---- */
 

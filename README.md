@@ -23,9 +23,10 @@ An AI-powered text adventure game where a large language model narrates interact
 | Backend | Express.js, TypeScript |
 | AI (Narrator) | OpenAI GPT-5.4 (streaming, SSE) |
 | AI (Suggestions) | OpenAI GPT-5-nano (minimal reasoning) |
+| AI (Images) | OpenAI GPT Image 1.5 (`low`, `jpeg`, 1024x1024) |
 | Database | Firestore-backed session persistence |
 | Realtime | Socket.IO |
-| Auth | Firebase Auth (email/password) |
+| Auth | Firebase Auth (Google sign-in) |
 | Markdown | react-markdown |
 | Monorepo | npm workspaces |
 
@@ -43,7 +44,7 @@ comp491-akboys/
 │   │       ├── index.ts       # Entry point (port 3001)
 │   │       ├── routes/chat.ts # All API routes
 │   │       ├── middleware/openai.ts  # GPT-5.4 streaming + GPT-5-nano suggestions
-│   │       └── store/SessionStore.ts # Session interface + in-memory implementation
+│   │       └── store/SessionStore.ts # Session interface + memory / Firestore implementations
 │   └── web/             # Next.js frontend
 │       └── src/
 │           ├── app/
@@ -87,6 +88,7 @@ npm run dev:local
 4. The narrator (GPT-5.4) streams the opening scene via SSE
 5. Player types actions, narrator responds in real-time
 6. After each narrator response, 3 follow-up suggestions appear (GPT-5-nano)
+7. When the player enters a new room, the frontend can request a cached scene image from GPT Image 1.5
 
 ## API Endpoints
 
@@ -130,14 +132,17 @@ Browser ──► Next.js (3000) ──► Express + Socket.IO (3001) ──► 
 
 ## Deployment
 
-- **Frontend live URL:** `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
+- **Frontend live URL:** `https://velvet-shadow.web.app`
+- **App Hosting backend URL:** `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
 - **Backend live URL:** `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
 - **Cloud Run project:** `lodos-prod`
 - **Firebase / Firestore / Auth project:** `comp491-akboys-2026`
 - **Frontend deploy:** run `firebase deploy --only apphosting` inside [packages/web](/Users/batuhankaraman/comp491-akboys/packages/web)
+- **Public alias deploy:** run `firebase deploy --only hosting:velvet` inside [packages/web](/Users/batuhankaraman/comp491-akboys/packages/web)
 - **Backend deploy:** build with `cloudbuild.backend.yaml`, then deploy with [packages/server/Dockerfile](/Users/batuhankaraman/comp491-akboys/packages/server/Dockerfile)
 - **Persistence mode:** set `SESSION_STORE=firestore`
 - **Frontend API override:** set `NEXT_PUBLIC_SERVER_URL` to the deployed backend URL
+- **Production CORS:** set `CORS_ORIGIN` as a comma-separated allowlist (for example `https://velvet-shadow.web.app,https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`)
 
 ## Scripts
 

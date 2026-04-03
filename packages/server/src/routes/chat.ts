@@ -38,6 +38,7 @@ export const store =
 export const storeReady = store.hydrate();
 
 const imageCache = new Map<string, string>();
+const DEBUG_PREFIX = '[chat]';
 
 const SCENARIO_STYLES: Record<string, string> = {
   noir: '1920s noir comic book art style, high contrast, dark shadows, sepia tones, moody atmospheric scene of ',
@@ -104,6 +105,12 @@ async function streamResponse(
   playerAction: string,
 ): Promise<void> {
   const session = store.get(sessionId)!;
+  console.log(`${DEBUG_PREFIX} stream:start`, {
+    sessionId,
+    scenarioId: session.scenarioId,
+    historyLengthBefore: session.history.length,
+    playerAction,
+  });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -113,13 +120,28 @@ async function streamResponse(
   res.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
 
   let fullText = '';
+  let chunkCount = 0;
 
   for await (const chunk of narratorChatStream(buildSystemPrompt(scenario), session.history)) {
+    chunkCount += 1;
     fullText += chunk;
+    if (chunkCount <= 5 || chunkCount % 25 === 0) {
+      console.log(`${DEBUG_PREFIX} stream:chunk`, {
+        sessionId,
+        chunkCount,
+        currentLength: fullText.length,
+      });
+    }
     res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
   }
 
   store.addMessage(sessionId, { role: 'assistant', content: fullText, timestamp: Date.now() });
+  console.log(`${DEBUG_PREFIX} stream:assistant-saved`, {
+    sessionId,
+    chunkCount,
+    finalLength: fullText.length,
+    historyLengthAfter: store.get(sessionId)?.history.length,
+  });
 
   try {
     const stateUpdates = await extractGameStateUpdate(
@@ -143,6 +165,11 @@ async function streamResponse(
       gameState: store.get(sessionId)?.gameState,
     })}\n\n`,
   );
+  console.log(`${DEBUG_PREFIX} stream:done`, {
+    sessionId,
+    historyLengthFinal: store.get(sessionId)?.history.length,
+    gameStateConversationLength: store.get(sessionId)?.gameState.conversationHistory.length,
+  });
   res.end();
 }
 
@@ -161,11 +188,19 @@ chatRouter.get('/scenarios', (_req: Request, res: Response) => {
 chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: Response) => {
   const session = store.get(req.params.id);
   if (!session) {
+    console.warn(`${DEBUG_PREFIX} session:get missing`, { sessionId: req.params.id });
     res.status(404).json({ error: 'Session not found' });
     return;
   }
 
   const scenario = SCENARIOS[session.scenarioId];
+  console.log(`${DEBUG_PREFIX} session:get`, {
+    sessionId: session.id,
+    historyLength: session.history.length,
+    conversationLength: session.gameState.conversationHistory.length,
+    state: session.state,
+    maxPlayers: session.maxPlayers,
+  });
   res.json({
     id: session.id,
     scenarioId: session.scenarioId,
@@ -361,6 +396,11 @@ chatRouter.post('/new', requireAuth, (req: Request, res: Response) => {
       const clampedMax = Math.min(Math.max(Math.round(maxPlayers), 2), 4);
       const roomCode = generateRoomCode(store.existingRoomCodes);
       const session = store.create('__pending', clampedMax, roomCode);
+      console.log(`${DEBUG_PREFIX} session:new multiplayer`, {
+        sessionId: session.id,
+        roomCode: session.roomCode,
+        maxPlayers: session.maxPlayers,
+      });
       res.json({
         sessionId: session.id,
         roomCode: session.roomCode,
@@ -376,6 +416,11 @@ chatRouter.post('/new', requireAuth, (req: Request, res: Response) => {
       }
       const startRoomId = scenario.rooms[0]?.id || 'start';
       const session = store.create(scenarioId, 1, undefined, startRoomId);
+      console.log(`${DEBUG_PREFIX} session:new singleplayer`, {
+        sessionId: session.id,
+        scenarioId,
+        startRoomId,
+      });
       res.json({ sessionId: session.id, scenarioId, maxPlayers: 1, mode: 'singleplayer' });
     }
   } catch (err) {
@@ -462,6 +507,7 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
 
     const session = store.get(sessionId);
     if (!session) {
+      console.warn(`${DEBUG_PREFIX} start missing`, { sessionId });
       res.status(404).json({ error: 'Session not found' });
       return;
     }
@@ -475,6 +521,10 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
         content: openingAction,
         timestamp: Date.now(),
       });
+      console.log(`${DEBUG_PREFIX} start opening-action-saved`, {
+        sessionId,
+        historyLength: store.get(sessionId)?.history.length,
+      });
     }
 
     const scenario = SCENARIOS[session.scenarioId];
@@ -483,6 +533,11 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
+    console.log(`${DEBUG_PREFIX} start streaming`, {
+      sessionId,
+      scenarioId: session.scenarioId,
+      historyLength: store.get(sessionId)?.history.length,
+    });
     await streamResponse(res, sessionId, scenario, openingAction);
   } catch (err) {
     console.error('[chat/start] error:', err);

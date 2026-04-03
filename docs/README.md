@@ -42,7 +42,8 @@ Run these to regenerate filled documents if content changes.
 
 ## Live Deployment
 
-- Frontend: `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
+- Frontend: `https://velvet-shadow.web.app`
+- App Hosting backend: `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
 - Backend: `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
 - Firebase project: `comp491-akboys-2026`
 - Cloud Run project: `lodos-prod`

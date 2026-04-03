@@ -355,11 +355,13 @@ export async function generateSceneImage(prompt: string): Promise<string> {
     model: 'gpt-image-1.5',
     prompt: prompt.slice(0, 1500),
     size: '1024x1024',
+    quality: 'low',
+    output_format: 'jpeg',
   });
 
   const first = response.data?.[0];
   if (first?.b64_json) {
-    return `data:image/png;base64,${first.b64_json}`;
+    return `data:image/jpeg;base64,${first.b64_json}`;
   }
 
   return first?.url ?? '';
