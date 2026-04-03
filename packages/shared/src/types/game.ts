@@ -4,7 +4,7 @@
  * All shared types for the text adventure game.
  * Used by both server and web packages.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

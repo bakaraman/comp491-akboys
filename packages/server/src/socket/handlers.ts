@@ -10,7 +10,7 @@
  * Communication flow:  comm:room / comm:direct → routed to targets only
  *                      (never touches narrator pipeline)
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-23
  */
 

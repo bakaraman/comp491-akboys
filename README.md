@@ -4,7 +4,7 @@
 
 An AI-powered text adventure game where a large language model narrates interactive stories in real-time. Players pick a scenario, explore rooms, talk to NPCs, and solve mysteries — all through natural language.
 
-## Team (AK Boys)
+## Team (AKBOYS)
 
 | Name | Student ID | Role |
 |---|---|---|
@@ -25,7 +25,7 @@ An AI-powered text adventure game where a large language model narrates interact
 | AI (Suggestions) | OpenAI GPT-5-nano (minimal reasoning) |
 | Database | Firestore-backed session persistence |
 | Realtime | Socket.IO |
-| Auth | Firebase Auth |
+| Auth | Firebase Auth (email/password) |
 | Markdown | react-markdown |
 | Monorepo | npm workspaces |
 
@@ -130,10 +130,12 @@ Browser ──► Next.js (3000) ──► Express + Socket.IO (3001) ──► 
 
 ## Deployment
 
-- **Backend service URL:** `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
+- **Frontend live URL:** `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
+- **Backend live URL:** `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
 - **Cloud Run project:** `lodos-prod`
-- **Firestore/Firebase project:** `comp491-akboys-2026`
-- **Runtime deployment flow:** build Docker image with `cloudbuild.backend.yaml`, then deploy to Cloud Run with `packages/server/Dockerfile`
+- **Firebase / Firestore / Auth project:** `comp491-akboys-2026`
+- **Frontend deploy:** run `firebase deploy --only apphosting` inside [packages/web](/Users/batuhankaraman/comp491-akboys/packages/web)
+- **Backend deploy:** build with `cloudbuild.backend.yaml`, then deploy with [packages/server/Dockerfile](/Users/batuhankaraman/comp491-akboys/packages/server/Dockerfile)
 - **Persistence mode:** set `SESSION_STORE=firestore`
 - **Frontend API override:** set `NEXT_PUBLIC_SERVER_URL` to the deployed backend URL
 

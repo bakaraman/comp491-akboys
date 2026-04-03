@@ -5,7 +5,7 @@
  * Parses structured narrator output with robust fallbacks.
  * Validates state mutations against canonical server state.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-23
  */
 

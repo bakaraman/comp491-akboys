@@ -39,3 +39,10 @@ Run these to regenerate filled documents if content changes.
 - `generate_doc.py` — Generates technical document DOCX
 - `generate_pdf.py` — Generates technical document PDF (black background)
 - `demo_v1.py` — Original Tkinter demo (single-player noir detective game)
+
+## Live Deployment
+
+- Frontend: `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
+- Backend: `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
+- Firebase project: `comp491-akboys-2026`
+- Cloud Run project: `lodos-prod`

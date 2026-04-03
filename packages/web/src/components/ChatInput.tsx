@@ -5,7 +5,7 @@
  * Always active in multiplayer — never disabled during narrator streaming.
  * Emits typing status changes for the typing indicator.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

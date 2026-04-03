@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "comp491-akboys-2026"
+  },
+  "targets": {
+    "comp491-akboys-2026": {
+      "hosting": {
+        "velvet": [
+          "velvet-shadow"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -4,7 +4,7 @@
  * One-click button that copies the current page URL so players
  * can easily invite friends to their session.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 

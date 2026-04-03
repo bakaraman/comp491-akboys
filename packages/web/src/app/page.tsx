@@ -4,7 +4,7 @@
  * Landing page with two mode cards. Shows a name popup on first visit.
  * Profile button in top-right to change name anytime.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 
@@ -12,18 +12,29 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import { AuthGuard } from '@/components/AuthGuard';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
 import { ProfileButton } from '@/components/ProfileButton';
+import { authEnabled, signOutUser } from '@/lib/firebase';
 
 export default function HomePage() {
   const router = useRouter();
-  const { name, loaded, setName } = usePlayerName();
+  const { name, loaded, setName, clearName } = usePlayerName();
+
+  async function handleSignOut() {
+    clearName();
+    if (authEnabled()) {
+      await signOutUser();
+    }
+    router.replace('/login');
+  }
 
   // Don't render until localStorage is read
   if (!loaded) return null;
 
   return (
+    <AuthGuard>
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
@@ -34,9 +45,37 @@ export default function HomePage() {
         <NamePopup onSave={setName} />
       )}
 
+      {authEnabled() && (
+        <button
+          onClick={handleSignOut}
+          style={{
+            position: 'fixed',
+            top: '16px',
+            right: name ? '190px' : '16px',
+            padding: '10px 14px',
+            backgroundColor: '#111',
+            border: '1px solid #2a2520',
+            borderRadius: '24px',
+            color: '#d88b73',
+            cursor: 'pointer',
+            zIndex: 30,
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            letterSpacing: '1px',
+            textTransform: 'uppercase',
+          }}
+        >
+          Sign out
+        </button>
+      )}
+
       {/* Profile button (only when name is set) */}
       {name && (
-        <ProfileButton name={name} onNameChange={setName} />
+        <ProfileButton
+          name={name}
+          onNameChange={setName}
+          onSignOut={handleSignOut}
+        />
       )}
 
       <div style={{ textAlign: 'center', maxWidth: '600px', width: '100%' }}>
@@ -157,9 +196,10 @@ export default function HomePage() {
           fontSize: '11px', color: '#2a2520',
           fontFamily: 'monospace',
         }}>
-          COMP 491 — AK Boys — Spring 2026
+          COMP 491 — AKBOYS — Spring 2026
         </p>
       </div>
     </div>
+    </AuthGuard>
   );
 }

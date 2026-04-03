@@ -4,7 +4,7 @@
  * Redirects to /login when Firebase auth is enabled and no user is present.
  * When auth is disabled via env, it simply renders children.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-04-03
  */
 

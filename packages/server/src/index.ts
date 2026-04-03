@@ -5,7 +5,7 @@
  * Mounts the /api/chat route for game narration.
  * Attaches Socket.IO for real-time multiplayer communication.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 
@@ -27,6 +27,24 @@ import { registerSocketHandlers } from './socket/handlers.js';
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const ALLOWED_ORIGINS = CORS_ORIGIN.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) return true;
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+};
 
 if (process.env.FIREBASE_PROJECT_ID && getApps().length === 0) {
   initializeApp({
@@ -36,7 +54,7 @@ if (process.env.FIREBASE_PROJECT_ID && getApps().length === 0) {
   console.log('[firebase] Admin SDK initialized');
 }
 
-app.use(cors({ origin: CORS_ORIGIN }));
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use('/api/chat', chatRouter);
@@ -53,7 +71,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: CORS_ORIGIN,
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
   },
 });
@@ -65,4 +83,5 @@ await storeReady;
 server.listen(PORT, () => {
   console.log(`[server] running on http://localhost:${PORT}`);
   console.log(`[socket.io] ready for connections`);
+  console.log(`[cors] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });

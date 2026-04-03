@@ -4,14 +4,14 @@
  * Displays player name, color, current room, inventory, and online status.
  * Slides in from the right with a smooth animation.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 
 'use client';
 
 import React, { useEffect } from 'react';
-import type { PlayerDataDTO } from '@akboys/shared';
+import type { PlayerDataDTO } from '@/types/shared';
 
 interface PlayerSidebarProps {
   players: PlayerDataDTO[];

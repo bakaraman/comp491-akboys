@@ -5,7 +5,7 @@
  * auth is enabled. When auth is disabled via env, it becomes a no-op
  * so local integration work can continue without blocking.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-04-03
  */
 

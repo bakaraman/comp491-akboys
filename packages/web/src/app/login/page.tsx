@@ -3,7 +3,7 @@
  *
  * Supports Google sign-in when auth is enabled.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-04-03
  */
 
@@ -11,7 +11,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { authEnabled, signInWithGoogle, subscribeToAuth } from '@/lib/firebase';
+import {
+  authEnabled,
+  signInWithGoogle,
+  subscribeToAuth,
+} from '@/lib/firebase';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -72,7 +76,7 @@ export default function LoginPage() {
           fontSize: '36px', color: '#d4a843', fontFamily: 'Georgia, serif',
           fontWeight: 'normal', fontStyle: 'italic', marginBottom: '8px',
         }}>
-          AK Boys
+          AKBOYS
         </h1>
         <p style={{
           fontSize: '13px', color: '#6a6050', fontFamily: 'monospace',

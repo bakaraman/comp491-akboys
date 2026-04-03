@@ -4,7 +4,7 @@
  * A hardcoded scenario for the initial demo.
  * Later this will be replaced by LLM-generated scenarios.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

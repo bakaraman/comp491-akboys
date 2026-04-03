@@ -5,11 +5,11 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "postbuild": "node scripts/sync-standalone-manifests.mjs",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
-    "@akboys/shared": "*",
     "firebase": "^11.7.1",
     "next": "^15.2.0",
     "react": "^19.0.0",

@@ -4,7 +4,7 @@
  * Renders messages from the narrator, players, or system (join/leave).
  * Supports markdown rendering and player name/color display.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

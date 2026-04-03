@@ -4,7 +4,7 @@
  * Shared type contracts for real-time multiplayer communication
  * between the server (socket.io) and web client (socket.io-client).
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-23
  */
 

@@ -4,7 +4,7 @@
  * Provides streaming and non-streaming chat functions.
  * Model and parameters are configured here as constants.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

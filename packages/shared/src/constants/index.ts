@@ -1,7 +1,7 @@
 /**
  * constants/index.ts — Constants exports hub
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

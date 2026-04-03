@@ -5,14 +5,14 @@
  * Multiplayer phases: Loading → Name Entry → Voting (scenario pick) → Game.
  * Single player: Loading → Game (SSE streaming).
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback, use } from 'react';
-import type { GameState } from '@akboys/shared';
+import type { GameState } from '@/types/shared';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInput } from '@/components/ChatInput';
 import { PlayerSidebar } from '@/components/PlayerSidebar';

@@ -3,7 +3,7 @@
  *
  * Two options: create a new room (Host) or enter a room code (Join).
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 

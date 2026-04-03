@@ -4,7 +4,7 @@
  * Provides auth helpers and a small fetch wrapper that injects the
  * Firebase ID token when auth is enabled.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-04-03
  */
 

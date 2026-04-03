@@ -4,7 +4,7 @@
  * Stores and retrieves the player's display name. Returns null
  * if the player hasn't set a name yet (first visit).
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 

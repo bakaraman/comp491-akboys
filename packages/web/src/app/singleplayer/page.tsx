@@ -4,7 +4,7 @@
  * Player picks a story, creates a single-player session,
  * and gets redirected to /session/[uuid] for the SSE-based game.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 

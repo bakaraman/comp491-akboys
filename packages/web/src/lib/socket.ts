@@ -4,7 +4,7 @@
  * Provides a single, reusable Socket.IO connection to the game server.
  * All components share the same socket instance via getSocket().
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 
@@ -12,7 +12,7 @@ import { io, Socket } from 'socket.io-client';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
-} from '@akboys/shared';
+} from '@/types/shared';
 
 export type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 

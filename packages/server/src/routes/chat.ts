@@ -6,7 +6,7 @@
  * POST /api/chat/suggestions — Get follow-up action suggestions
  * GET  /api/chat/scenarios   — List available scenarios
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

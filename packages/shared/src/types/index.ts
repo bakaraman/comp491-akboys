@@ -3,7 +3,7 @@
  *
  * Re-exports all shared types from a single entry point.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

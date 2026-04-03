@@ -4,14 +4,14 @@
  * Slide-out drawer with two tabs: Room (local) and Direct (radio).
  * Completely separate from the narrator/action pipeline.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import type { PlayerDataDTO, CommMessageDTO } from '@akboys/shared';
+import type { PlayerDataDTO, CommMessageDTO } from '@/types/shared';
 
 interface CommPanelProps {
   isOpen: boolean;

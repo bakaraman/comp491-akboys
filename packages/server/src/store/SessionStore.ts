@@ -5,7 +5,7 @@
  * concrete MemorySessionStore implementation backed by a Map.
  * Supports both single-player (legacy) and multiplayer sessions.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

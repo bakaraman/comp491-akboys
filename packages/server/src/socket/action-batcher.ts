@@ -5,7 +5,7 @@
  * as a single batch. This allows the narrator to respond to
  * multiple players in one coherent reply.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-23
  */
 

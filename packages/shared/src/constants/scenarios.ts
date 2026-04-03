@@ -4,7 +4,7 @@
  * Contains every playable scenario in a single SCENARIOS map.
  * Each entry is keyed by a URL-friendly slug.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-12
  */
 

@@ -4,7 +4,7 @@
  * Shown as a centered overlay when the player hasn't set a name yet.
  * Also used for editing name from the profile button.
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 

@@ -7,14 +7,14 @@
  * Separates game actions (narrator pipeline) from communication
  * (player-to-player, never touches narrator).
  *
- * @author AK Boys Team
+ * @author AKBOYS Team
  * @since 2026-03-24
  */
 
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { PlayerDataDTO, CommMessageDTO } from '@akboys/shared';
+import type { PlayerDataDTO, CommMessageDTO } from '@/types/shared';
 import { getSocket, disconnectSocket, type GameSocket } from '../lib/socket';
 
 /* ------------------------------------------------------------------ */
