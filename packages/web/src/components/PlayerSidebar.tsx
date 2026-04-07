@@ -191,62 +191,6 @@ export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSi
                   </div>
                 </div>
 
-                {/* Inventory */}
-                {player.inventory.length > 0 && (
-                  <div style={{
-                    padding: '8px 12px',
-                    backgroundColor: '#0a0a0a',
-                    borderRadius: '6px',
-                  }}>
-                    <div style={{
-                      fontSize: '9px', color: '#5a5545',
-                      fontFamily: 'monospace', textTransform: 'uppercase',
-                      letterSpacing: '1.5px', marginBottom: '6px',
-                    }}>
-                      Inventory ({player.inventory.length})
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {player.inventory.map((item) => (
-                        <span
-                          key={item}
-                          style={{
-                            padding: '3px 8px',
-                            backgroundColor: '#1a1510',
-                            border: '1px solid #2a2520',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            color: '#d4a843',
-                            fontFamily: 'monospace',
-                          }}
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {player.inventory.length === 0 && (
-                  <div style={{
-                    padding: '8px 12px',
-                    backgroundColor: '#0a0a0a',
-                    borderRadius: '6px',
-                  }}>
-                    <div style={{
-                      fontSize: '9px', color: '#5a5545',
-                      fontFamily: 'monospace', textTransform: 'uppercase',
-                      letterSpacing: '1.5px', marginBottom: '4px',
-                    }}>
-                      Inventory
-                    </div>
-                    <div style={{
-                      fontSize: '12px', color: '#3a3530',
-                      fontStyle: 'italic',
-                    }}>
-                      Empty
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}

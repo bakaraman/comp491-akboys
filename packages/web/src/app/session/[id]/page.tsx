@@ -655,7 +655,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 Who committed the crime? Choose wisely — a wrong accusation ends the case.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-                {sessionInfo.scenarioMeta.npcs.map((npc) => {
+                {sessionInfo.scenarioMeta.npcs.filter((npc) => (spGameState?.visitedRooms || []).includes(npc.roomId || '')).map((npc) => {
                   const isSelected = selectedSuspect === npc.id;
                   return (
                     <button

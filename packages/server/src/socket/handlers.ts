@@ -351,6 +351,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     session.isStreaming = false;
     void store.sync(sessionId);
+
+    // Always broadcast final player state after all actions resolve
+    const finalPlayers = Array.from(session.players.values()).map(toPlayerDTO);
+    io.to(sessionId).emit('players:updated', { players: finalPlayers });
   });
 
   io.on('connection', (socket: GameSocket) => {
