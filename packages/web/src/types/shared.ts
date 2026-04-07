@@ -150,5 +150,6 @@ export interface ServerToClientEvents {
     votes: Record<string, string[]>;
   }) => void;
   'comm:message': (data: CommMessageDTO) => void;
+  'players:updated': (data: { players: PlayerDataDTO[] }) => void;
   'evidence:shared': (data: SharedEvidenceEntry) => void;
 }

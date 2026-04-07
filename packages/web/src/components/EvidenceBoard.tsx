@@ -433,6 +433,25 @@ function SuspectsTab({
   onAccuse?: (suspectId: string) => void;
   onProposeAccusation?: (suspectId: string) => void;
 }) {
+  if (suspects.length === 0) {
+    return (
+      <div style={{
+        textAlign: 'center', padding: '48px 20px',
+        color: '#4a4540', fontFamily: 'Georgia, serif', fontStyle: 'italic',
+      }}>
+        <div style={{ fontSize: '36px', marginBottom: '16px', opacity: 0.4 }}>
+          {'\uD83D\uDC64'}
+        </div>
+        <p style={{ fontSize: '15px', lineHeight: '1.6' }}>
+          No suspects encountered yet.
+        </p>
+        <p style={{ fontSize: '13px', marginTop: '8px' }}>
+          Visit rooms and meet the characters.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {suspects.map((npc) => (
@@ -486,16 +505,6 @@ function SuspectCard({
               fontFamily: 'Georgia, serif',
             }}>
               {npc.name}
-            </span>
-            <span style={{
-              padding: '2px 8px', borderRadius: '999px',
-              fontSize: '10px', fontFamily: 'monospace',
-              letterSpacing: '1px', textTransform: 'uppercase',
-              backgroundColor: npc.visited ? '#1a2518' : '#1a1815',
-              color: npc.visited ? '#5bcf7f' : '#5a5545',
-              border: `1px solid ${npc.visited ? '#2a3a28' : '#2a2520'}`,
-            }}>
-              {npc.visited ? 'Visited' : 'Not yet'}
             </span>
           </div>
           <div style={{

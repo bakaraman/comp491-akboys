@@ -108,7 +108,15 @@ RULES:
 - "observed" is shown to other players in the same room. Keep it spoiler-free.
 - Respect the WORLD STATE LOG. If an item was picked up, it is gone. If a door was opened, it stays open.
 - Stay in character as the narrator.
-- If the action is impossible, describe the failure in "response" and write a suitable "observed".`;
+- If the action is impossible, describe the failure in "response" and write a suitable "observed".
+
+CRITICAL DIRECTIVE RULES:
+- When a player examines, picks up, takes, or collects an item, you MUST include a PICKUP directive: {"type":"PICKUP","player":"${actingPlayerName}","target":"item_id"}
+- Items marked [EVIDENCE] are especially important — always use PICKUP when the player finds or takes evidence.
+- When a player moves to a new room, you MUST include a MOVE directive: {"type":"MOVE","player":"${actingPlayerName}","target":"room_id"}
+- When a player opens, unlocks, or breaks something, include the appropriate directive (OPEN, UNLOCK, BREAK).
+- Use exact item IDs and room IDs from the lists above, not display names.
+- If the player's action involves finding or examining an item and they would logically take it, include PICKUP.`;
 }
 
 /* ------------------------------------------------------------------ */

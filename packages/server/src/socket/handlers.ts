@@ -340,6 +340,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       void store.sync(sessionId);
 
+      // Broadcast updated player positions/inventory to all clients after directives
+      if (directives.length > 0) {
+        const updatedPlayers = Array.from(session.players.values()).map(toPlayerDTO);
+        io.to(sessionId).emit('players:updated', { players: updatedPlayers });
+      }
+
       console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
     }
 

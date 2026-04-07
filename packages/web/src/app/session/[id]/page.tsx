@@ -230,7 +230,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [selectedSuspect, setSelectedSuspect] = useState('');
-  const [selectedEvidence, setSelectedEvidence] = useState('');
   const [spStatusMessage, setSpStatusMessage] = useState<string | null>(null);
 
   const attachSceneImage = useCallback(async (text: string, messageIndex: number) => {
@@ -387,7 +386,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }, [attachSceneImage, sessionId, spGameState?.status, spLoading, spMessages.length]);
 
   const handleAccuse = useCallback(async () => {
-    if (!selectedSuspect || !selectedEvidence) return;
+    if (!selectedSuspect) return;
     try {
       const res = await fetch(`${API_BASE}/api/chat/accuse`, {
         method: 'POST',
@@ -395,7 +394,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         body: JSON.stringify({
           sessionId,
           suspectId: selectedSuspect,
-          evidenceId: selectedEvidence,
         }),
       });
       const data = await res.json();
@@ -409,11 +407,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       }
       setIsAccuseOpen(false);
       setSelectedSuspect('');
-      setSelectedEvidence('');
     } catch {
       setSpStatusMessage('Accusation failed. Please try again.');
     }
-  }, [selectedEvidence, selectedSuspect, sessionId]);
+  }, [selectedSuspect, sessionId]);
 
   const handlePlayAgain = useCallback(async () => {
     if (!sessionInfo) return;
@@ -648,54 +645,84 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60,
           }}>
             <div style={{
-              width: '100%', maxWidth: '420px', backgroundColor: '#111', border: '1px solid #2a2520',
-              borderRadius: '14px', padding: '24px',
+              width: '100%', maxWidth: '460px', backgroundColor: '#111', border: '1px solid #2a2520',
+              borderRadius: '14px', padding: '28px',
             }}>
-              <h2 style={{ color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0 }}>
+              <h2 style={{ color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0, marginBottom: '6px' }}>
                 Final Accusation
               </h2>
-              <p style={{ color: '#9a9080', fontSize: '14px', lineHeight: '1.6' }}>
-                Choose the culprit and the key piece of evidence. A wrong accusation ends the case badly.
+              <p style={{ color: '#9a9080', fontSize: '13px', lineHeight: '1.6', marginBottom: '20px' }}>
+                Who committed the crime? Choose wisely — a wrong accusation ends the case.
               </p>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#b0a080', fontFamily: 'monospace', fontSize: '12px' }}>
-                Suspect
-              </label>
-              <select
-                value={selectedSuspect}
-                onChange={(e) => setSelectedSuspect(e.target.value)}
-                style={{ width: '100%', marginBottom: '16px', padding: '12px', backgroundColor: '#1a1a1a', color: '#e8e0d4', border: '1px solid #2a2520', borderRadius: '8px' }}
-              >
-                <option value="">Select a suspect</option>
-                {sessionInfo.scenarioMeta.npcs.map((npc) => (
-                  <option key={npc.id} value={npc.id}>{npc.name}</option>
-                ))}
-              </select>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#b0a080', fontFamily: 'monospace', fontSize: '12px' }}>
-                Evidence
-              </label>
-              <select
-                value={selectedEvidence}
-                onChange={(e) => setSelectedEvidence(e.target.value)}
-                style={{ width: '100%', marginBottom: '20px', padding: '12px', backgroundColor: '#1a1a1a', color: '#e8e0d4', border: '1px solid #2a2520', borderRadius: '8px' }}
-              >
-                <option value="">Select evidence</option>
-                {sessionInfo.scenarioMeta.evidenceItems.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                {sessionInfo.scenarioMeta.npcs.map((npc) => {
+                  const isSelected = selectedSuspect === npc.id;
+                  return (
+                    <button
+                      key={npc.id}
+                      onClick={() => setSelectedSuspect(npc.id)}
+                      style={{
+                        padding: '14px 16px',
+                        backgroundColor: isSelected ? '#1a1510' : '#0d0d0d',
+                        border: `2px solid ${isSelected ? '#d4a843' : '#1e1e1e'}`,
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'all 0.2s',
+                        display: 'flex', alignItems: 'center', gap: '12px',
+                      }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = '#3a3530'; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = '#1e1e1e'; }}
+                    >
+                      <div style={{
+                        width: '36px', height: '36px', borderRadius: '50%',
+                        backgroundColor: isSelected ? '#d4a843' : '#1a1815',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '16px', flexShrink: 0,
+                        transition: 'all 0.2s',
+                      }}>
+                        {isSelected ? '\u2713' : '\uD83D\uDC64'}
+                      </div>
+                      <div>
+                        <div style={{
+                          fontSize: '14px', fontFamily: 'Georgia, serif',
+                          color: isSelected ? '#d4a843' : '#b0a080',
+                          transition: 'color 0.2s',
+                        }}>
+                          {npc.name}
+                        </div>
+                        {npc.description && (
+                          <div style={{ fontSize: '11px', color: '#5a5545', fontFamily: 'monospace', marginTop: '2px' }}>
+                            {npc.description}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button
-                  onClick={() => setIsAccuseOpen(false)}
-                  style={{ padding: '10px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#6a6050', fontFamily: 'monospace', cursor: 'pointer' }}
+                  onClick={() => { setIsAccuseOpen(false); setSelectedSuspect(''); }}
+                  style={{ padding: '10px 20px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#6a6050', fontFamily: 'monospace', cursor: 'pointer', transition: 'all 0.2s' }}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAccuse}
-                  disabled={!selectedSuspect || !selectedEvidence}
-                  style={{ padding: '10px 16px', backgroundColor: '#d4a843', border: 'none', borderRadius: '8px', color: '#0a0a0a', fontFamily: 'monospace', fontWeight: 'bold', cursor: 'pointer' }}
+                  disabled={!selectedSuspect}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: selectedSuspect ? '#7a2020' : '#1a1815',
+                    border: `1px solid ${selectedSuspect ? '#d46868' : '#2a2520'}`,
+                    borderRadius: '8px',
+                    color: selectedSuspect ? '#e8e0d4' : '#3a3530',
+                    fontFamily: 'monospace', fontWeight: 'bold',
+                    cursor: selectedSuspect ? 'pointer' : 'not-allowed',
+                    transition: 'all 0.2s',
+                  }}
                 >
-                  Confirm
+                  Confirm Accusation
                 </button>
               </div>
             </div>
@@ -709,14 +736,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           const allEvidence: EvidenceItem[] = (meta?.items || [])
             .filter((i) => i.isEvidence)
             .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
-          const suspects: SuspectInfo[] = (meta?.npcs || []).map((npc) => ({
-            id: npc.id,
-            name: npc.name,
-            description: npc.description || '',
-            roomId: npc.roomId || '',
-            roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
-            visited: spGameState?.visitedRooms?.includes(npc.roomId || '') || false,
-          }));
+          const visitedRooms = spGameState?.visitedRooms || [];
+          const suspects: SuspectInfo[] = (meta?.npcs || [])
+            .filter((npc) => visitedRooms.includes(npc.roomId || ''))
+            .map((npc) => ({
+              id: npc.id,
+              name: npc.name,
+              description: npc.description || '',
+              roomId: npc.roomId || '',
+              roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
+              visited: true,
+            }));
           const discoveredIds = [
             ...(spGameState?.discoveredEvidence || []),
             ...(spGameState?.inventory || []),
@@ -1116,14 +1146,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         const allEvidence: EvidenceItem[] = (meta?.items || [])
           .filter((i) => i.isEvidence)
           .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
-        const suspects: SuspectInfo[] = (meta?.npcs || []).map((npc) => ({
-          id: npc.id,
-          name: npc.name,
-          description: npc.description || '',
-          roomId: npc.roomId || '',
-          roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
-          visited: myPlayer?.visitedRooms?.includes(npc.roomId || '') || false,
-        }));
+        const mpVisitedRooms = myPlayer?.visitedRooms || [];
+        const suspects: SuspectInfo[] = (meta?.npcs || [])
+          .filter((npc) => mpVisitedRooms.includes(npc.roomId || ''))
+          .map((npc) => ({
+            id: npc.id,
+            name: npc.name,
+            description: npc.description || '',
+            roomId: npc.roomId || '',
+            roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
+            visited: true,
+          }));
         const myInventory = myPlayer?.inventory || [];
         const discoveredIds = myInventory.filter((id) =>
           allEvidence.some((e) => e.id === id),

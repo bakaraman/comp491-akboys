@@ -225,6 +225,9 @@ export interface ServerToClientEvents {
   /** Communication message delivery */
   'comm:message': (data: CommMessageDTO) => void;
 
+  /** Broadcast updated player list after state changes (MOVE, PICKUP, etc.) */
+  'players:updated': (data: { players: PlayerDataDTO[] }) => void;
+
   /** Evidence shared by a teammate */
   'evidence:shared': (data: {
     evidenceId: string;

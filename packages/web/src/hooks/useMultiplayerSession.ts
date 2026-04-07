@@ -281,6 +281,11 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setUnreadComm((prev) => prev + 1);
     });
 
+    /* -- Player state updates (after MOVE/PICKUP directives) -- */
+    socket.on('players:updated', ({ players: updatedPlayers }) => {
+      setPlayers(updatedPlayers);
+    });
+
     /* -- Evidence sharing events -- */
     socket.on('evidence:shared', (entry) => {
       setSharedEvidence((prev) => {

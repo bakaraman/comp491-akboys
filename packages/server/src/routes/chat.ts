@@ -453,8 +453,8 @@ chatRouter.post('/accuse', requireAuth, async (req: Request, res: Response) => {
       evidenceId?: string;
     };
 
-    if (!sessionId || !suspectId || !evidenceId) {
-      res.status(400).json({ error: 'sessionId, suspectId, and evidenceId are required' });
+    if (!sessionId || !suspectId) {
+      res.status(400).json({ error: 'sessionId and suspectId are required' });
       return;
     }
 
@@ -481,7 +481,6 @@ chatRouter.post('/accuse', requireAuth, async (req: Request, res: Response) => {
 
     const isCorrectAccusation =
       suspectId === scenario.solution.culpritId &&
-      evidenceId === scenario.solution.evidenceId &&
       foundAllRequiredEvidence;
 
     store.updateGameState(sessionId, {
@@ -491,14 +490,13 @@ chatRouter.post('/accuse', requireAuth, async (req: Request, res: Response) => {
     });
 
     const suspect = scenario.npcs.find((npc) => npc.id === suspectId)?.name || suspectId;
-    const evidence = scenario.items.find((item) => item.id === evidenceId)?.name || evidenceId;
 
     res.json({
       success: true,
       isCorrect: isCorrectAccusation,
       summary: isCorrectAccusation
-        ? `You accused ${suspect} with the ${evidence} and solved the case.`
-        : `You accused ${suspect} with the ${evidence}, but the case is not fully proven.`,
+        ? `You accused ${suspect} and solved the case. Justice has been served.`
+        : `You accused ${suspect}, but the evidence doesn't add up. The real culprit slips away.`,
       gameState: store.get(sessionId)?.gameState,
     });
   } catch (err) {
