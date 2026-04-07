@@ -88,6 +88,13 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioVotes, setScenarioVotes] = useState<Record<string, string[]>>({});
   const [unreadComm, setUnreadComm] = useState(0);
+  const [sharedEvidence, setSharedEvidence] = useState<Array<{
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }>>([]);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -234,6 +241,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
       if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
       if (session.commHistory) setCommMessages(session.commHistory);
+      if (session.sharedEvidence) setSharedEvidence(session.sharedEvidence);
 
       // Rebuild message history — server already filtered for this player
       const restored: DisplayMessage[] = session.history.map((m, i) => ({
@@ -271,6 +279,14 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     socket.on('comm:message', (msg: CommMessageDTO) => {
       setCommMessages((prev) => [...prev, msg]);
       setUnreadComm((prev) => prev + 1);
+    });
+
+    /* -- Evidence sharing events -- */
+    socket.on('evidence:shared', (entry) => {
+      setSharedEvidence((prev) => {
+        if (prev.some((s) => s.evidenceId === entry.evidenceId)) return prev;
+        return [...prev, entry];
+      });
     });
 
     /* -- Connect -- */
@@ -394,6 +410,15 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     [sessionId, myPlayerId],
   );
 
+  const shareEvidence = useCallback(
+    (evidenceId: string) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return;
+      socket.emit('evidence:share', { sessionId, playerId: myPlayerId, evidenceId });
+    },
+    [sessionId, myPlayerId],
+  );
+
   /* ---- Return ---- */
 
   return {
@@ -414,6 +439,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     selectedScenarioId,
     scenarioVotes,
     unreadComm,
+    sharedEvidence,
 
     joinSession,
     selectScenario,
@@ -425,5 +451,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     sendDirectMessage,
     clearUnreadComm,
     sendTyping,
+    shareEvidence,
   };
 }

@@ -220,11 +220,22 @@ chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: 
     gameState: session.gameState,
     scenarioMeta: scenario ? {
       maxTurns: scenario.maxTurns,
-      npcs: scenario.npcs.map((npc) => ({ id: npc.id, name: npc.name })),
+      npcs: scenario.npcs.map((npc) => ({
+        id: npc.id, name: npc.name,
+        description: npc.description, roomId: npc.roomId,
+      })),
       evidenceItems: scenario.items
         .filter((item) => item.isEvidence)
         .map((item) => ({ id: item.id, name: item.name })),
+      items: scenario.items.map((item) => ({
+        id: item.id, name: item.name, description: item.description,
+        roomId: item.roomId, isEvidence: item.isEvidence,
+      })),
+      rooms: scenario.rooms.map((room) => ({
+        id: room.id, name: room.name,
+      })),
     } : null,
+    sharedEvidence: session.sharedEvidence || [],
   });
 });
 

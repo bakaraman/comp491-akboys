@@ -61,6 +61,13 @@ export interface SessionStateDTO {
   selectedScenarioId?: string | null;
   scenarioVotes?: Record<string, string[]>;
   commHistory?: CommMessageDTO[];
+  sharedEvidence?: Array<{
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -125,6 +132,13 @@ export interface ClientToServerEvents {
     playerId: string;
     targetPlayerId: string;
     content: string;
+  }) => void;
+
+  /** Share discovered evidence with the team (multiplayer) */
+  'evidence:share': (data: {
+    sessionId: string;
+    playerId: string;
+    evidenceId: string;
   }) => void;
 }
 
@@ -210,6 +224,15 @@ export interface ServerToClientEvents {
 
   /** Communication message delivery */
   'comm:message': (data: CommMessageDTO) => void;
+
+  /** Evidence shared by a teammate */
+  'evidence:shared': (data: {
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }) => void;
 }
 
 /* ------------------------------------------------------------------ */

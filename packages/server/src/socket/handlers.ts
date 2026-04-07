@@ -417,6 +417,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           selectedScenarioId: session.selectedScenarioId,
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
+          sharedEvidence: session.sharedEvidence || [],
         },
       });
 
@@ -573,6 +574,47 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       }
 
       console.log(`[comm:direct] ${sender.name} -> ${target.name}: "${content.slice(0, 40)}"`);
+    });
+
+    /* ================================================================ */
+    /*  EVIDENCE SHARING (multiplayer)                                  */
+    /* ================================================================ */
+
+    socket.on('evidence:share', (data) => {
+      const { sessionId, playerId, evidenceId } = data;
+      const session = store.get(sessionId);
+      if (!session || session.state !== 'playing') return;
+
+      const player = store.getPlayer(sessionId, playerId);
+      if (!player) return;
+
+      // Verify player actually has this item in their inventory
+      if (!player.inventory.includes(evidenceId)) {
+        socket.emit('session:error', { message: 'You do not have this evidence' });
+        return;
+      }
+
+      // Check if already shared
+      if (session.sharedEvidence.some((s) => s.evidenceId === evidenceId)) {
+        return; // Already shared, no-op
+      }
+
+      const entry = {
+        evidenceId,
+        sharedByPlayerId: playerId,
+        sharedByPlayerName: player.name,
+        sharedByPlayerColor: player.color,
+        timestamp: Date.now(),
+      };
+
+      session.sharedEvidence.push(entry);
+      session.lastActivityAt = Date.now();
+      void store.sync(sessionId);
+
+      // Broadcast to all players in the session
+      io.to(sessionId).emit('evidence:shared', entry);
+
+      console.log(`[evidence:share] ${player.name} shared ${evidenceId}`);
     });
 
     /* ================================================================ */
@@ -751,6 +793,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           selectedScenarioId: session.selectedScenarioId,
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
+          sharedEvidence: session.sharedEvidence || [],
         },
       });
 

@@ -18,6 +18,8 @@ import { ChatInput } from '@/components/ChatInput';
 import { PlayerSidebar } from '@/components/PlayerSidebar';
 import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { CommPanel } from '@/components/CommPanel';
+import { EvidenceBoard } from '@/components/EvidenceBoard';
+import type { EvidenceItem, SuspectInfo } from '@/components/EvidenceBoard';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
@@ -47,9 +49,18 @@ interface SessionInfo {
   gameState?: GameState;
   scenarioMeta?: {
     maxTurns: number;
-    npcs: Array<{ id: string; name: string }>;
+    npcs: Array<{ id: string; name: string; description?: string; roomId?: string }>;
     evidenceItems: Array<{ id: string; name: string }>;
+    items?: Array<{ id: string; name: string; description: string; roomId: string; isEvidence: boolean }>;
+    rooms?: Array<{ id: string; name: string }>;
   } | null;
+  sharedEvidence?: Array<{
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }>;
 }
 
 interface ScenarioInfo {
@@ -217,6 +228,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [spSuggestions, setSpSuggestions] = useState<string[]>([]);
   const [spGameState, setSpGameState] = useState<GameState | null>(null);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
+  const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [selectedSuspect, setSelectedSuspect] = useState('');
   const [selectedEvidence, setSelectedEvidence] = useState('');
   const [spStatusMessage, setSpStatusMessage] = useState<string | null>(null);
@@ -555,6 +567,28 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {spGameState?.status === 'playing' && (
+              <button
+                onClick={() => setIsJournalOpen(true)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #2a3a2a',
+                  borderRadius: '6px',
+                  color: '#8aaa70',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#8aaa70'; e.currentTarget.style.color = '#b0d090'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3a2a'; e.currentTarget.style.color = '#8aaa70'; }}
+              >
+                Journal
+              </button>
+            )}
             {spGameState?.status === 'playing' && sessionInfo.scenarioMeta && (
               <button
                 onClick={() => setIsAccuseOpen(true)}
@@ -667,6 +701,42 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
         )}
+
+        {/* Evidence Board (SP) */}
+        {(() => {
+          const meta = sessionInfo.scenarioMeta;
+          const roomMap = Object.fromEntries((meta?.rooms || []).map((r) => [r.id, r.name]));
+          const allEvidence: EvidenceItem[] = (meta?.items || [])
+            .filter((i) => i.isEvidence)
+            .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
+          const suspects: SuspectInfo[] = (meta?.npcs || []).map((npc) => ({
+            id: npc.id,
+            name: npc.name,
+            description: npc.description || '',
+            roomId: npc.roomId || '',
+            roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
+            visited: spGameState?.visitedRooms?.includes(npc.roomId || '') || false,
+          }));
+          const discoveredIds = [
+            ...(spGameState?.discoveredEvidence || []),
+            ...(spGameState?.inventory || []),
+          ].filter((id, idx, arr) => arr.indexOf(id) === idx);
+          return (
+            <EvidenceBoard
+              mode="singleplayer"
+              isOpen={isJournalOpen}
+              onClose={() => setIsJournalOpen(false)}
+              allEvidence={allEvidence}
+              discoveredIds={discoveredIds}
+              suspects={suspects}
+              onAccuse={(suspectId) => {
+                setSelectedSuspect(suspectId);
+                setIsJournalOpen(false);
+                setIsAccuseOpen(true);
+              }}
+            />
+          );
+        })()}
 
         {isGameOver && (
           <div style={{
@@ -966,6 +1036,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </div>
             ))}
           </button>
+          <button
+            onClick={() => setIsJournalOpen(true)}
+            style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a3a2a', borderRadius: '6px', color: '#8aaa70', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#8aaa70'; e.currentTarget.style.color = '#b0d090'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3a2a'; e.currentTarget.style.color = '#8aaa70'; }}
+          >Journal</button>
           <button onClick={handleLeave} style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#cf5b5b'; e.currentTarget.style.color = '#cf5b5b'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
@@ -1032,6 +1108,39 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onSendDirect={mp.sendDirectMessage}
         onOpened={mp.clearUnreadComm}
       />
+
+      {/* Evidence Board (MP) */}
+      {(() => {
+        const meta = sessionInfo?.scenarioMeta;
+        const roomMap = Object.fromEntries((meta?.rooms || []).map((r) => [r.id, r.name]));
+        const allEvidence: EvidenceItem[] = (meta?.items || [])
+          .filter((i) => i.isEvidence)
+          .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
+        const suspects: SuspectInfo[] = (meta?.npcs || []).map((npc) => ({
+          id: npc.id,
+          name: npc.name,
+          description: npc.description || '',
+          roomId: npc.roomId || '',
+          roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
+          visited: myPlayer?.visitedRooms?.includes(npc.roomId || '') || false,
+        }));
+        const myInventory = myPlayer?.inventory || [];
+        const discoveredIds = myInventory.filter((id) =>
+          allEvidence.some((e) => e.id === id),
+        );
+        return (
+          <EvidenceBoard
+            mode="multiplayer"
+            isOpen={isJournalOpen}
+            onClose={() => setIsJournalOpen(false)}
+            allEvidence={allEvidence}
+            discoveredIds={discoveredIds}
+            suspects={suspects}
+            sharedEvidence={mp.sharedEvidence}
+            onShareEvidence={mp.shareEvidence}
+          />
+        );
+      })()}
 
       {mp.toast && (
         <div style={{ position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', backgroundColor: '#2a1a1a', border: '1px solid #5a3030', borderRadius: '8px', color: '#cf8a8a', fontSize: '13px', fontFamily: 'monospace', zIndex: 60, animation: 'fadeInUp 0.3s ease' }}>

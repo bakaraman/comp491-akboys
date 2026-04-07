@@ -73,6 +73,7 @@ export interface ClientToServerEvents {
   'comm:direct': (
     data: { sessionId: string; playerId: string; targetPlayerId: string; content: string },
   ) => void;
+  'evidence:share': (data: { sessionId: string; playerId: string; evidenceId: string }) => void;
 }
 
 export interface SessionStateDTO {
@@ -92,6 +93,15 @@ export interface SessionStateDTO {
   selectedScenarioId?: string | null;
   scenarioVotes?: Record<string, string[]>;
   commHistory?: CommMessageDTO[];
+  sharedEvidence?: SharedEvidenceEntry[];
+}
+
+export interface SharedEvidenceEntry {
+  evidenceId: string;
+  sharedByPlayerId: string;
+  sharedByPlayerName: string;
+  sharedByPlayerColor: string;
+  timestamp: number;
 }
 
 export interface ServerToClientEvents {
@@ -140,4 +150,5 @@ export interface ServerToClientEvents {
     votes: Record<string, string[]>;
   }) => void;
   'comm:message': (data: CommMessageDTO) => void;
+  'evidence:shared': (data: SharedEvidenceEntry) => void;
 }

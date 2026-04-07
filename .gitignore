@@ -40,3 +40,8 @@ __pycache__/
 *.tmp
 ~$*
 .gstack/
+
+# Kadir's personal files (never push)
+README_KADIR.md
+CLAUDE_KADIR.md
+TODO.md

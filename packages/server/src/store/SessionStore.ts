@@ -52,6 +52,15 @@ export interface SessionData {
   /* Communication history (player-to-player, not narrator) */
   commHistory: CommMessageDTO[];
 
+  /* Evidence shared by players in multiplayer */
+  sharedEvidence: Array<{
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }>;
+
   /* World state log for narrator consistency — human-readable entries */
   worldStateLog: string[];
 
@@ -159,6 +168,7 @@ export class MemorySessionStore implements SessionStore {
       selectedScenarioId: null,
       scenarioVotes: new Map(),
       commHistory: [],
+      sharedEvidence: [],
       worldStateLog: [],
       worldStateEvents: [],
       objectStates: new Map(),
