@@ -209,15 +209,22 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           case 'MOVE': {
             const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
             if (p) {
-              store.updatePlayer(sessionId, p.id, { currentRoomId: directive.target });
-              if (!p.visitedRooms.includes(directive.target)) p.visitedRooms.push(directive.target);
+              const newVisited = p.visitedRooms.includes(directive.target)
+                ? p.visitedRooms
+                : [...p.visitedRooms, directive.target];
+              store.updatePlayer(sessionId, p.id, {
+                currentRoomId: directive.target,
+                visitedRooms: newVisited,
+              });
             }
             break;
           }
           case 'PICKUP': {
             const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
             if (p && !p.inventory.includes(directive.target)) {
-              p.inventory.push(directive.target);
+              store.updatePlayer(sessionId, p.id, {
+                inventory: [...p.inventory, directive.target],
+              });
             }
             break;
           }
@@ -280,6 +287,56 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         console.log(`[directive] APPLIED: ${directive.type} ${directive.playerName} -> ${directive.target}`);
       }
 
+      // Fallback evidence detection: scan narrative for item names (like SP does)
+      // This catches cases where the AI describes finding an item but omits the PICKUP directive
+      const actingPlayer = store.getPlayer(sessionId, action.playerId);
+      if (actingPlayer) {
+        const lowerResponse = privateResponse.toLowerCase();
+        const evidenceItems = scenario.items.filter((i) => i.isEvidence);
+        for (const item of evidenceItems) {
+          if (actingPlayer.inventory.includes(item.id)) continue;
+          const itemName = item.name.toLowerCase();
+          const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
+          if (lowerResponse.includes(itemName) || lowerResponse.includes(itemIdWords)) {
+            const currentInv = store.getPlayer(sessionId, action.playerId)?.inventory || [];
+            if (!currentInv.includes(item.id)) {
+              store.updatePlayer(sessionId, action.playerId, {
+                inventory: [...currentInv, item.id],
+              });
+              session.worldStateLog.push(`Turn ${session.gameState.turnCount}: ${item.id} discovered by ${action.playerName} in ${action.roomId}`);
+              console.log(`[evidence-fallback] ${action.playerName} discovered ${item.id} via narrative mention`);
+            }
+          }
+        }
+
+        // Also detect room movement from narrative if no MOVE directive was issued
+        if (!directives.some((d) => d.type === 'MOVE')) {
+          const lowerAction = action.message.toLowerCase();
+          const isMovement = /\b(go|walk|move|head|enter|leave|travel|climb)\b/.test(lowerAction);
+          if (isMovement) {
+            const freshPlayer = store.getPlayer(sessionId, action.playerId);
+            if (freshPlayer) {
+              const currentRoom = scenario.rooms.find((r) => r.id === freshPlayer.currentRoomId);
+              const dirMatch = lowerAction.match(/\b(north|south|east|west|up|down)\b/);
+              if (currentRoom && dirMatch) {
+                const nextRoomId = currentRoom.exits[dirMatch[1]];
+                if (nextRoomId) {
+                  const newVisited = freshPlayer.visitedRooms.includes(nextRoomId)
+                    ? freshPlayer.visitedRooms
+                    : [...freshPlayer.visitedRooms, nextRoomId];
+                  store.updatePlayer(sessionId, action.playerId, {
+                    currentRoomId: nextRoomId,
+                    visitedRooms: newVisited,
+                  });
+                  session.worldStateLog.push(`Turn ${session.gameState.turnCount}: ${action.playerName} moved to ${nextRoomId}`);
+                  console.log(`[move-fallback] ${action.playerName} moved to ${nextRoomId} via action text`);
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Store private response in history (scoped to actor)
       store.addMessage(sessionId, {
         role: 'assistant',
@@ -340,11 +397,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       void store.sync(sessionId);
 
-      // Broadcast updated player positions/inventory to all clients after directives
-      if (directives.length > 0) {
-        const updatedPlayers = Array.from(session.players.values()).map(toPlayerDTO);
-        io.to(sessionId).emit('players:updated', { players: updatedPlayers });
-      }
+      // Always broadcast updated player state after each action resolves
+      const updatedPlayersAfterAction = Array.from(session.players.values()).map(toPlayerDTO);
+      io.to(sessionId).emit('players:updated', { players: updatedPlayersAfterAction });
 
       console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
     }

@@ -404,6 +404,13 @@ interface StoredSessionData {
   selectedScenarioId: string | null;
   scenarioVotes: Record<string, string[]>;
   commHistory: CommMessageDTO[];
+  sharedEvidence: Array<{
+    evidenceId: string;
+    sharedByPlayerId: string;
+    sharedByPlayerName: string;
+    sharedByPlayerColor: string;
+    timestamp: number;
+  }>;
   worldStateLog: string[];
   worldStateEvents: WorldStateEvent[];
   objectStates: Record<string, Record<string, boolean>>;
@@ -428,6 +435,7 @@ function serializeSession(session: SessionData): StoredSessionData {
       Array.from(session.scenarioVotes.entries()).map(([key, value]) => [key, [...value]]),
     ),
     commHistory: session.commHistory,
+    sharedEvidence: session.sharedEvidence,
     worldStateLog: session.worldStateLog,
     worldStateEvents: session.worldStateEvents,
     objectStates: Object.fromEntries(session.objectStates.entries()),
@@ -453,6 +461,7 @@ function deserializeSession(data: StoredSessionData): SessionData {
       Object.entries(data.scenarioVotes || {}).map(([key, value]) => [key, new Set(value)]),
     ),
     commHistory: data.commHistory || [],
+    sharedEvidence: data.sharedEvidence || [],
     worldStateLog: data.worldStateLog || [],
     worldStateEvents: data.worldStateEvents || [],
     objectStates: new Map(Object.entries(data.objectStates || {})),
