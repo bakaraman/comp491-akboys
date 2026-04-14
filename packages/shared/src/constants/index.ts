@@ -7,3 +7,5 @@
 
 export { NOIR_SCENARIO } from './scenario.js';
 export { SCENARIOS } from './scenarios.js';
+export { MAP_LAYOUTS } from './map-layouts.js';
+export type { RoomPosition, ScenarioMapLayout } from './map-layouts.js';

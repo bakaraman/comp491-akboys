@@ -260,7 +260,16 @@ Rules:
     const parsed = JSON.parse(raw);
 
     if (typeof parsed.currentRoomId === 'string' && roomIds.includes(parsed.currentRoomId)) {
-      partial.currentRoomId = parsed.currentRoomId;
+      // Validate: movement must be to an adjacent room (prevents LLM hallucination
+      // where it suggests a room that isn't directly reachable from current position).
+      const currentRoom = scenario.rooms.find((r) => r.id === currentState.currentRoomId);
+      const adjacentIds = currentRoom ? Object.values(currentRoom.exits) : [];
+      const isSameRoom = parsed.currentRoomId === currentState.currentRoomId;
+      const isAdjacent = adjacentIds.includes(parsed.currentRoomId);
+      if (isSameRoom || isAdjacent) {
+        partial.currentRoomId = parsed.currentRoomId;
+      }
+      // If LLM returned a non-adjacent room, silently ignore and let fallback handle it
     }
 
     if (
@@ -310,12 +319,43 @@ Rules:
   }
 
   if (!partial.currentRoomId && isMovementAction) {
+    const currentRoom = scenario.rooms.find((r) => r.id === currentState.currentRoomId);
+    const adjacentIds = currentRoom ? Object.values(currentRoom.exits) : [];
+
+    // Priority 1: player explicitly named an ADJACENT room in the action text
+    // (This is the user's direct intent — honor it first)
     for (const room of scenario.rooms) {
       if (room.id === currentState.currentRoomId) continue;
+      if (!adjacentIds.includes(room.id)) continue;
       const roomName = room.name.toLowerCase();
-      if (lowerNarrative.includes(roomName) || actionLower.includes(roomName)) {
+      if (actionLower.includes(roomName)) {
         partial.currentRoomId = room.id;
         break;
+      }
+    }
+
+    // Priority 2: narrative clearly describes arrival in an adjacent room
+    if (!partial.currentRoomId) {
+      for (const room of scenario.rooms) {
+        if (room.id === currentState.currentRoomId) continue;
+        if (!adjacentIds.includes(room.id)) continue;
+        const roomName = room.name.toLowerCase();
+        if (lowerNarrative.includes(roomName)) {
+          partial.currentRoomId = room.id;
+          break;
+        }
+      }
+    }
+
+    // Priority 3: any room name in action (rare edge case — non-adjacent intent)
+    if (!partial.currentRoomId) {
+      for (const room of scenario.rooms) {
+        if (room.id === currentState.currentRoomId) continue;
+        const roomName = room.name.toLowerCase();
+        if (actionLower.includes(roomName)) {
+          partial.currentRoomId = room.id;
+          break;
+        }
       }
     }
   }

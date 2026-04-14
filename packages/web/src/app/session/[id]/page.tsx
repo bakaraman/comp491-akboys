@@ -20,6 +20,8 @@ import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { CommPanel } from '@/components/CommPanel';
 import { EvidenceBoard } from '@/components/EvidenceBoard';
 import type { EvidenceItem, SuspectInfo } from '@/components/EvidenceBoard';
+import { GameMap } from '@/components/GameMap';
+import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
@@ -52,7 +54,7 @@ interface SessionInfo {
     npcs: Array<{ id: string; name: string; description?: string; roomId?: string }>;
     evidenceItems: Array<{ id: string; name: string }>;
     items?: Array<{ id: string; name: string; description: string; roomId: string; isEvidence: boolean }>;
-    rooms?: Array<{ id: string; name: string }>;
+    rooms?: Array<{ id: string; name: string; exits?: Record<string, string> }>;
   } | null;
   sharedEvidence?: Array<{
     evidenceId: string;
@@ -196,23 +198,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const [fetchError, setFetchError] = useState(false);
 
+  const refreshSessionInfo = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
+        headers: await getAuthHeaders(),
+      });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      setSessionInfo(data);
+    } catch {
+      setFetchError(true);
+    }
+  }, [sessionId]);
+
   useEffect(() => {
     if (!authReady) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
-          headers: await getAuthHeaders(),
-        });
-        if (!response.ok) throw new Error();
-        const data = await response.json();
-        if (!cancelled) setSessionInfo(data);
-      } catch {
-        if (!cancelled) setFetchError(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [authReady, sessionId]);
+    void refreshSessionInfo();
+  }, [authReady, refreshSessionInfo]);
 
   const isMultiplayer = sessionInfo ? sessionInfo.maxPlayers > 1 : false;
 
@@ -222,6 +224,18 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
 
+  /* Auto-refresh session info when MP game transitions to playing state
+     (scenario is confirmed, title/meta becomes available) */
+  const prevGameStateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const prev = prevGameStateRef.current;
+    if (mp.gameState === 'playing' && prev !== 'playing') {
+      void refreshSessionInfo();
+    }
+    prevGameStateRef.current = mp.gameState;
+  }, [mp.gameState, isMultiplayer, refreshSessionInfo]);
+
   /* ---- Single player state ---- */
   const [spMessages, setSpMessages] = useState<SPMessage[]>([]);
   const [spLoading, setSpLoading] = useState(false);
@@ -229,6 +243,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [spGameState, setSpGameState] = useState<GameState | null>(null);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [isJournalOpen, setIsJournalOpen] = useState(false);
+  const [isMapOpen, setIsMapOpen] = useState(false);
   const [selectedSuspect, setSelectedSuspect] = useState('');
   const [spStatusMessage, setSpStatusMessage] = useState<string | null>(null);
 
@@ -566,6 +581,28 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {spGameState?.status === 'playing' && (
               <button
+                onClick={() => setIsMapOpen(true)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #2a3540',
+                  borderRadius: '6px',
+                  color: '#7a9ab8',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7a9ab8'; e.currentTarget.style.color = '#9ab8d0'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
+              >
+                Map
+              </button>
+            )}
+            {spGameState?.status === 'playing' && (
+              <button
                 onClick={() => setIsJournalOpen(true)}
                 style={{
                   padding: '6px 12px',
@@ -764,6 +801,51 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 setIsJournalOpen(false);
                 setIsAccuseOpen(true);
               }}
+            />
+          );
+        })()}
+
+        {/* Game Map (SP) */}
+        {(() => {
+          const meta = sessionInfo.scenarioMeta;
+          const mapRooms: MapRoom[] = (meta?.rooms || []).map((r) => ({
+            id: r.id,
+            name: r.name,
+            exits: r.exits || {},
+          }));
+          const mapNpcs: MapNPC[] = (meta?.npcs || []).map((n) => ({
+            id: n.id,
+            name: n.name,
+            roomId: n.roomId || '',
+          }));
+          return (
+            <GameMap
+              isOpen={isMapOpen}
+              onClose={() => setIsMapOpen(false)}
+              scenarioId={sessionInfo.scenarioId}
+              rooms={mapRooms}
+              npcs={mapNpcs}
+              currentRoomId={spGameState?.currentRoomId || ''}
+              visitedRooms={spGameState?.visitedRooms || []}
+              onTravel={(roomName) => {
+                // Include direction for clearer AI interpretation
+                const currentRoom = mapRooms.find((r) => r.id === spGameState?.currentRoomId);
+                const targetRoom = mapRooms.find((r) => r.name === roomName);
+                let direction: string | null = null;
+                if (currentRoom && targetRoom) {
+                  for (const [dir, roomId] of Object.entries(currentRoom.exits)) {
+                    if (roomId === targetRoom.id) {
+                      direction = dir;
+                      break;
+                    }
+                  }
+                }
+                const command = direction
+                  ? `I go ${direction} to the ${roomName}.`
+                  : `I go to the ${roomName}.`;
+                void spSend(command);
+              }}
+              disabled={spLoading || isGameOver}
             />
           );
         })()}
@@ -1067,6 +1149,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             ))}
           </button>
           <button
+            onClick={() => setIsMapOpen(true)}
+            style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a3540', borderRadius: '6px', color: '#7a9ab8', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7a9ab8'; e.currentTarget.style.color = '#9ab8d0'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
+          >Map</button>
+          <button
             onClick={() => setIsJournalOpen(true)}
             style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a3a2a', borderRadius: '6px', color: '#8aaa70', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#8aaa70'; e.currentTarget.style.color = '#b0d090'; }}
@@ -1171,6 +1259,64 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             suspects={suspects}
             sharedEvidence={mp.sharedEvidence}
             onShareEvidence={mp.shareEvidence}
+          />
+        );
+      })()}
+
+      {/* Game Map (MP) */}
+      {(() => {
+        const meta = sessionInfo?.scenarioMeta;
+        const mapRooms: MapRoom[] = (meta?.rooms || []).map((r) => ({
+          id: r.id,
+          name: r.name,
+          exits: r.exits || {},
+        }));
+        const mapNpcs: MapNPC[] = (meta?.npcs || []).map((n) => ({
+          id: n.id,
+          name: n.name,
+          roomId: n.roomId || '',
+        }));
+        const teammates = mp.players
+          .filter((p) => p.id !== mp.myPlayerId)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            color: p.color,
+            currentRoomId: p.currentRoomId,
+            isConnected: p.isConnected,
+          }));
+        return (
+          <GameMap
+            isOpen={isMapOpen}
+            onClose={() => setIsMapOpen(false)}
+            scenarioId={sessionInfo?.scenarioId || ''}
+            rooms={mapRooms}
+            npcs={mapNpcs}
+            currentRoomId={myPlayer?.currentRoomId || ''}
+            visitedRooms={myPlayer?.visitedRooms || []}
+            mode="multiplayer"
+            teammates={teammates}
+            myName={myPlayer?.name}
+            myColor={myPlayer?.color}
+            onTravel={(roomName) => {
+              // Include direction for clearer AI interpretation
+              const currentRoom = mapRooms.find((r) => r.id === myPlayer?.currentRoomId);
+              const targetRoom = mapRooms.find((r) => r.name === roomName);
+              let direction: string | null = null;
+              if (currentRoom && targetRoom) {
+                for (const [dir, roomId] of Object.entries(currentRoom.exits)) {
+                  if (roomId === targetRoom.id) {
+                    direction = dir;
+                    break;
+                  }
+                }
+              }
+              const command = direction
+                ? `I go ${direction} to the ${roomName}.`
+                : `I go to the ${roomName}.`;
+              mp.sendAction(command);
+            }}
+            disabled={mp.isNarratorStreaming}
           />
         );
       })()}

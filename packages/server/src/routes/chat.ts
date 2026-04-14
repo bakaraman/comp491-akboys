@@ -233,6 +233,7 @@ chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: 
       })),
       rooms: scenario.rooms.map((room) => ({
         id: room.id, name: room.name,
+        exits: { ...room.exits },
       })),
     } : null,
     sharedEvidence: session.sharedEvidence || [],
