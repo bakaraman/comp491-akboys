@@ -78,7 +78,7 @@ export async function* narratorChatStream(
 export interface StructuredNarratorResponse {
   response: string;
   observed: string;
-  directives: Array<{ type: string; player: string; target: string }>;
+  directives: Array<{ type: string; player: string; target: string; detail?: string }>;
 }
 
 export async function narratorStructuredResponse(
@@ -112,11 +112,12 @@ export async function narratorStructuredResponse(
                 items: {
                   type: 'object',
                   properties: {
-                    type: { type: 'string', description: 'MOVE, PICKUP, OPEN, CLOSE, UNLOCK, BREAK, REVEAL, USE, REMOVE, or STATE' },
+                    type: { type: 'string', description: 'MOVE, PICKUP, OPEN, CLOSE, UNLOCK, BREAK, REVEAL, USE, REMOVE, STATE, DISCOVER, SANITY, NPC_MOOD, NPC_MEMORY, NPC_MOVE, or DISCOVER_EXIT' },
                     player: { type: 'string', description: 'Player name' },
-                    target: { type: 'string', description: 'Room ID, item ID, or state change description' },
+                    target: { type: 'string', description: 'Room ID, item ID, number for SANITY, npcId:roomId for NPC_MOVE, or roomId:direction for DISCOVER_EXIT' },
+                    detail: { type: 'string', description: 'Optional extra info: disposition for NPC_MOOD (friendly/neutral/hostile/scared), memory text for NPC_MEMORY' },
                   },
-                  required: ['type', 'player', 'target'],
+                  required: ['type', 'player', 'target', 'detail'],
                   additionalProperties: false,
                 },
                 description: 'State change directives. Only include if something changed.',
@@ -278,17 +279,26 @@ Rules:
   }
 
   const lowerNarrative = narrative.toLowerCase();
-  const discoveredEvidence = new Set(currentState.discoveredEvidence);
-  for (const item of evidenceItems) {
-    const itemName = item.name.toLowerCase();
-    const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
-    if (lowerNarrative.includes(itemName) || lowerNarrative.includes(itemIdWords)) {
-      discoveredEvidence.add(item.id);
-    }
-  }
 
-  if (discoveredEvidence.size !== currentState.discoveredEvidence.length) {
-    partial.discoveredEvidence = [...discoveredEvidence];
+  // #27 FIX: Evidence discovery now requires explicit examine/investigate action
+  // AND both the player action and narrator response must reference the item.
+  // In multiplayer, evidence discovery is handled by DISCOVER directives from the narrator.
+  const isExamineAction = /\b(examine|inspect|investigate|search|discover|find|pick.?up|look.?at|study|analyze)\b/i.test(actionLower);
+  if (isExamineAction) {
+    const discoveredEvidence = new Set(currentState.discoveredEvidence);
+    for (const item of evidenceItems) {
+      const itemName = item.name.toLowerCase();
+      const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
+      // Both action AND narrative must reference the item to count as discovered
+      const mentionedInAction = actionLower.includes(itemName) || actionLower.includes(itemIdWords);
+      const mentionedInNarrative = lowerNarrative.includes(itemName) || lowerNarrative.includes(itemIdWords);
+      if (mentionedInAction && mentionedInNarrative) {
+        discoveredEvidence.add(item.id);
+      }
+    }
+    if (discoveredEvidence.size !== currentState.discoveredEvidence.length) {
+      partial.discoveredEvidence = [...discoveredEvidence];
+    }
   }
 
   if (!partial.currentRoomId && isMovementAction) {

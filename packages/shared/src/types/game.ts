@@ -8,12 +8,73 @@
  * @since 2026-03-12
  */
 
+/* ------------------------------------------------------------------ */
+/*  Player roles (#18)                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Available player roles */
+export type PlayerRole = 'detective' | 'thief' | 'doctor' | 'journalist';
+
+export interface RoleAbility {
+  id: PlayerRole;
+  name: string;
+  description: string;
+  /** Passive bonuses applied automatically */
+  passiveEffects: string[];
+}
+
+export const PLAYER_ROLES: Record<PlayerRole, RoleAbility> = {
+  detective: {
+    id: 'detective',
+    name: 'Detective',
+    description: 'Can propose accusations and gets extra deduction hints',
+    passiveEffects: ['can_accuse'],
+  },
+  thief: {
+    id: 'thief',
+    name: 'Thief',
+    description: 'Can discover hidden rooms and pick locks',
+    passiveEffects: ['find_hidden_rooms', 'pick_locks'],
+  },
+  doctor: {
+    id: 'doctor',
+    name: 'Doctor',
+    description: 'Resists sanity damage and can heal teammates',
+    passiveEffects: ['sanity_resistance', 'heal_others'],
+  },
+  journalist: {
+    id: 'journalist',
+    name: 'Journalist',
+    description: 'Gets extra information from NPCs',
+    passiveEffects: ['npc_bonus_info'],
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/*  Game world types                                                   */
+/* ------------------------------------------------------------------ */
+
+/** Hidden exit configuration for secret passages (#40) */
+export interface HiddenExit {
+  targetRoomId: string;
+  /** How to discover: 'search' | 'item_required' | 'thief_only' */
+  discoverMethod: 'search' | 'item_required' | 'thief_only';
+  /** Item ID required (if discoverMethod === 'item_required') */
+  requiredItemId?: string;
+  /** Description when discovered */
+  discoverDescription?: string;
+}
+
 /** A single room in the game world */
 export interface Room {
   id: string;
   name: string;
   description: string;
   exits: Record<string, string>;   // direction -> roomId
+  /** Exits that are hidden until discovered (#40) */
+  hiddenExits?: Record<string, HiddenExit>;
+  /** Is this room hidden until reached via a hidden exit? (#40) */
+  isHidden?: boolean;
   items: string[];
   npcs: string[];
 }
@@ -27,6 +88,18 @@ export interface NPC {
   dialogue: string[];
 }
 
+/** Runtime NPC state — persistent across all player interactions (#19) */
+export interface NPCState {
+  id: string;
+  disposition: 'friendly' | 'neutral' | 'hostile' | 'scared';
+  /** Key events that happened with this NPC */
+  memories: string[];
+  /** Which player names have talked to this NPC */
+  metPlayers: string[];
+  /** Current room — can change during gameplay (#39) */
+  currentRoomId: string;
+}
+
 /** An item in the game world */
 export interface Item {
   id: string;
@@ -34,6 +107,10 @@ export interface Item {
   description: string;
   roomId: string;
   isEvidence: boolean;
+  /** Evidence IDs that must be discovered before this item can be found (#26) */
+  prerequisites?: string[];
+  /** Description shown when prerequisites aren't met (#26) */
+  lockedDescription?: string;
 }
 
 /** The full scenario generated before a game session */
@@ -103,6 +180,12 @@ export type PlayerColor = (typeof PLAYER_COLORS)[number];
 export interface PlayerData {
   id: string;
   name: string;
+  /** Player's chosen role (#18) */
+  role?: PlayerRole;
+  /** Current sanity points, 0-100 (#38) */
+  sanity: number;
+  /** Maximum sanity (#38) */
+  maxSanity: number;
   currentRoomId: string;
   inventory: string[];
   visitedRooms: string[];
@@ -133,12 +216,31 @@ export interface MultiplayerChatMessage extends ChatMessage {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Accusation / voting types (#25)                                    */
+/* ------------------------------------------------------------------ */
+
+/** Active accusation vote in a multiplayer session */
+export interface AccusationVote {
+  proposerId: string;
+  proposerName: string;
+  suspectId: string;
+  suspectName: string;
+  votes: Map<string, 'guilty' | 'not_guilty'>;
+  startedAt: number;
+  expiresAt: number;
+}
+
+/* ------------------------------------------------------------------ */
 /*  World state event types                                            */
 /* ------------------------------------------------------------------ */
 
 /** Structured state mutation reported by the narrator */
 export interface WorldStateEvent {
-  type: 'move' | 'pickup' | 'open' | 'close' | 'unlock' | 'break' | 'reveal' | 'use' | 'remove' | 'state_change';
+  type:
+    | 'move' | 'pickup' | 'open' | 'close' | 'unlock' | 'break'
+    | 'reveal' | 'use' | 'remove' | 'state_change'
+    | 'discover' | 'sanity' | 'npc_mood' | 'npc_memory' | 'npc_move'
+    | 'discover_exit';
   playerName: string;
   targetId: string;
   detail?: string;

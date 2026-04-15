@@ -8,7 +8,7 @@
  * @since 2026-03-23
  */
 
-import type { PlayerData } from './game.js';
+import type { PlayerData, PlayerRole } from './game.js';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs (Data Transfer Objects)                                       */
@@ -18,6 +18,9 @@ import type { PlayerData } from './game.js';
 export interface PlayerDataDTO {
   id: string;
   name: string;
+  role?: string;
+  sanity: number;
+  maxSanity: number;
   currentRoomId: string;
   inventory: string[];
   visitedRooms: string[];
@@ -126,6 +129,24 @@ export interface ClientToServerEvents {
     targetPlayerId: string;
     content: string;
   }) => void;
+
+  /** Select a player role (#18) */
+  'player:select-role': (
+    data: { sessionId: string; playerId: string; role: PlayerRole },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
+
+  /** Propose an accusation in multiplayer (#25) */
+  'player:propose-accusation': (
+    data: { sessionId: string; playerId: string; suspectId: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
+
+  /** Vote on an active accusation (#25) */
+  'player:vote-accusation': (
+    data: { sessionId: string; playerId: string; vote: 'guilty' | 'not_guilty' },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -210,6 +231,45 @@ export interface ServerToClientEvents {
 
   /** Communication message delivery */
   'comm:message': (data: CommMessageDTO) => void;
+
+  /** Player role updated (#18) */
+  'player:role-updated': (data: {
+    playerId: string;
+    playerName: string;
+    role: string;
+    allPlayers: PlayerDataDTO[];
+  }) => void;
+
+  /** Accusation vote started (#25) */
+  'accusation:vote-started': (data: {
+    proposerId: string;
+    proposerName: string;
+    suspectId: string;
+    suspectName: string;
+    expiresAt: number;
+  }) => void;
+
+  /** Accusation vote result (#25) */
+  'accusation:vote-result': (data: {
+    result: 'guilty' | 'not_guilty';
+    votes: Record<string, 'guilty' | 'not_guilty'>;
+    isCorrect?: boolean;
+    summary?: string;
+  }) => void;
+
+  /** Game over (#25) */
+  'session:gameover': (data: {
+    status: 'won' | 'lost';
+    endReason: 'solved' | 'wrong_accusation' | 'turn_limit' | 'sanity_death';
+    summary: string;
+  }) => void;
+
+  /** Sanity update (#38) */
+  'player:sanity-update': (data: {
+    playerId: string;
+    sanity: number;
+    delta: number;
+  }) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,6 +280,9 @@ export function toPlayerDTO(p: PlayerData): PlayerDataDTO {
   return {
     id: p.id,
     name: p.name,
+    role: p.role,
+    sanity: p.sanity,
+    maxSanity: p.maxSanity,
     currentRoomId: p.currentRoomId,
     inventory: [...p.inventory],
     visitedRooms: [...p.visitedRooms],

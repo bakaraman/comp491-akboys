@@ -21,6 +21,8 @@ import type {
   PlayerColor,
   CommMessageDTO,
   WorldStateEvent,
+  AccusationVote,
+  NPCState,
 } from '@akboys/shared';
 import { PLAYER_COLORS } from '@akboys/shared';
 
@@ -64,6 +66,15 @@ export interface SessionData {
    * Value: Record of flags, e.g. { open: true, broken: true }
    */
   objectStates: Map<string, Record<string, boolean>>;
+
+  /** Runtime NPC states — persistent across all player interactions (#19, #39) */
+  npcStates: Map<string, NPCState>;
+
+  /** Active accusation vote, null when no vote in progress (#25) */
+  activeAccusation: AccusationVote | null;
+
+  /** Multiplayer turn counter — incremented after each action batch (#25) */
+  mpTurnCount: number;
 }
 
 /** Contract every session store must satisfy */
@@ -162,6 +173,9 @@ export class MemorySessionStore implements SessionStore {
       worldStateLog: [],
       worldStateEvents: [],
       objectStates: new Map(),
+      npcStates: new Map(),
+      activeAccusation: null,
+      mpTurnCount: 0,
     };
 
     this.sessions.set(session.id, session);
@@ -397,6 +411,9 @@ interface StoredSessionData {
   worldStateLog: string[];
   worldStateEvents: WorldStateEvent[];
   objectStates: Record<string, Record<string, boolean>>;
+  npcStates: Array<{ id: string; disposition: string; memories: string[]; metPlayers: string[]; currentRoomId: string }>;
+  activeAccusation: { proposerId: string; proposerName: string; suspectId: string; suspectName: string; votes: Record<string, string>; startedAt: number; expiresAt: number } | null;
+  mpTurnCount: number;
 }
 
 function serializeSession(session: SessionData): StoredSessionData {
@@ -421,6 +438,19 @@ function serializeSession(session: SessionData): StoredSessionData {
     worldStateLog: session.worldStateLog,
     worldStateEvents: session.worldStateEvents,
     objectStates: Object.fromEntries(session.objectStates.entries()),
+    npcStates: Array.from(session.npcStates.values()),
+    activeAccusation: session.activeAccusation
+      ? {
+          proposerId: session.activeAccusation.proposerId,
+          proposerName: session.activeAccusation.proposerName,
+          suspectId: session.activeAccusation.suspectId,
+          suspectName: session.activeAccusation.suspectName,
+          votes: Object.fromEntries(session.activeAccusation.votes.entries()),
+          startedAt: session.activeAccusation.startedAt,
+          expiresAt: session.activeAccusation.expiresAt,
+        }
+      : null,
+    mpTurnCount: session.mpTurnCount,
   };
 }
 
@@ -446,6 +476,28 @@ function deserializeSession(data: StoredSessionData): SessionData {
     worldStateLog: data.worldStateLog || [],
     worldStateEvents: data.worldStateEvents || [],
     objectStates: new Map(Object.entries(data.objectStates || {})),
+    npcStates: new Map((data.npcStates || []).map((npc) => [
+      npc.id,
+      {
+        id: npc.id,
+        disposition: npc.disposition as NPCState['disposition'],
+        memories: npc.memories || [],
+        metPlayers: npc.metPlayers || [],
+        currentRoomId: npc.currentRoomId,
+      },
+    ])),
+    activeAccusation: data.activeAccusation
+      ? {
+          proposerId: data.activeAccusation.proposerId,
+          proposerName: data.activeAccusation.proposerName,
+          suspectId: data.activeAccusation.suspectId,
+          suspectName: data.activeAccusation.suspectName,
+          votes: new Map(Object.entries(data.activeAccusation.votes || {})) as Map<string, 'guilty' | 'not_guilty'>,
+          startedAt: data.activeAccusation.startedAt,
+          expiresAt: data.activeAccusation.expiresAt,
+        }
+      : null,
+    mpTurnCount: data.mpTurnCount || 0,
   };
 }
 
