@@ -96,60 +96,13 @@ export default function HomePage() {
           AI-Powered Text Adventure
         </p>
 
-        {/* Mode cards */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr',
-          gap: '16px', marginBottom: '48px',
-        }}>
-          {/* Single Player */}
-          <button
-            onClick={() => router.push('/singleplayer')}
-            style={{
-              padding: '36px 24px',
-              backgroundColor: '#111',
-              border: '1px solid #1e1e1e',
-              borderRadius: '14px',
-              cursor: 'pointer',
-              textAlign: 'center',
-              transition: 'all 0.3s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#d4a843';
-              e.currentTarget.style.backgroundColor = '#141210';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#1e1e1e';
-              e.currentTarget.style.backgroundColor = '#111';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            <div style={{ fontSize: '36px', marginBottom: '14px' }}>
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4a843" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            </div>
-            <div style={{
-              fontSize: '18px', color: '#e8e0d4',
-              fontFamily: 'Georgia, serif', fontWeight: 'bold',
-              marginBottom: '8px',
-            }}>
-              Single Player
-            </div>
-            <div style={{
-              fontSize: '12px', color: '#5a5545',
-              fontFamily: 'monospace', lineHeight: '1.5',
-            }}>
-              Solo adventure with the AI narrator
-            </div>
-          </button>
-
-          {/* Multiplayer */}
+        {/* Start game — multiplayer only */}
+        <div style={{ marginBottom: '48px' }}>
           <button
             onClick={() => router.push('/multiplayer')}
             style={{
               padding: '36px 24px',
+              width: '100%',
               backgroundColor: '#111',
               border: '1px solid #1e1e1e',
               borderRadius: '14px',
@@ -177,17 +130,17 @@ export default function HomePage() {
               </svg>
             </div>
             <div style={{
-              fontSize: '18px', color: '#e8e0d4',
+              fontSize: '20px', color: '#e8e0d4',
               fontFamily: 'Georgia, serif', fontWeight: 'bold',
               marginBottom: '8px',
             }}>
-              Multiplayer
+              Start a Session
             </div>
             <div style={{
               fontSize: '12px', color: '#5a5545',
               fontFamily: 'monospace', lineHeight: '1.5',
             }}>
-              Play with 2-4 friends in real-time
+              Play with 2-5 detectives in real-time
             </div>
           </button>
         </div>
