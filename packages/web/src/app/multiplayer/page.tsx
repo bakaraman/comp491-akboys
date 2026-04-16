@@ -22,8 +22,11 @@ export default function MultiplayerPage() {
   const router = useRouter();
   const { name: playerName, setName: setPlayerName } = usePlayerName();
   const [mode, setMode] = useState<'choice' | 'host' | 'join'>('choice');
-  const [maxPlayers, setMaxPlayers] = useState(2);
   const [roomCodeInput, setRoomCodeInput] = useState('');
+
+  // Room capacity is fixed at the maximum (10). The host doesn't have to pick a size —
+  // players just keep joining until the room fills.
+  const maxPlayers = 10;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,47 +222,12 @@ export default function MultiplayerPage() {
             borderRadius: '14px', padding: '32px',
           }}>
             <p style={{
-              fontSize: '10px', color: '#5a5545',
-              fontFamily: 'monospace', textTransform: 'uppercase',
-              letterSpacing: '2px', marginBottom: '16px',
+              fontSize: '13px', color: '#b0a080',
+              fontFamily: 'Georgia, serif', lineHeight: '1.6',
+              marginBottom: '20px', textAlign: 'center',
             }}>
-              Number of Players
+              Create a new session. Share the room code with your friends — up to ten detectives can join.
             </p>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-              {[2, 3, 4, 5].map((n) => {
-                const isActive = maxPlayers === n;
-                return (
-                  <button
-                    key={n}
-                    onClick={() => setMaxPlayers(n)}
-                    style={{
-                      flex: 1, padding: '14px 0',
-                      backgroundColor: isActive ? '#d4a843' : '#0a0a0a',
-                      color: isActive ? '#0a0a0a' : '#6a6050',
-                      border: `1px solid ${isActive ? '#d4a843' : '#2a2520'}`,
-                      borderRadius: '8px', cursor: 'pointer',
-                      fontSize: '15px', fontFamily: 'monospace',
-                      fontWeight: isActive ? 'bold' : 'normal',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.borderColor = '#4a4030';
-                        e.currentTarget.style.color = '#9a9080';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.borderColor = '#2a2520';
-                        e.currentTarget.style.color = '#6a6050';
-                      }
-                    }}
-                  >
-                    {n}
-                  </button>
-                );
-              })}
-            </div>
 
             <button
               onClick={handleHost}

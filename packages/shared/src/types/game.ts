@@ -172,6 +172,12 @@ export const PLAYER_COLORS = [
   '#5ba3cf', // blue
   '#cf5b5b', // red
   '#5bcf7f', // green
+  '#b87ed4', // violet
+  '#e89a5a', // orange
+  '#6ac9c9', // teal
+  '#d46a9c', // rose
+  '#a8c95b', // lime
+  '#c9c96a', // mustard
 ] as const;
 
 export type PlayerColor = (typeof PLAYER_COLORS)[number];
