@@ -58,6 +58,13 @@ export const SCENARIOS: Record<string, Scenario> = {
           'Red velvet curtains frame the room. The bartender polishes glasses ' +
           'with an expression that says he has seen everything.',
         exits: { west: 'street', north: 'backstage' },
+        hiddenExits: {
+          down: {
+            targetRoomId: 'wine_cellar',
+            discoverMethod: 'search',
+            discoverDescription: 'You notice a loose floorboard behind the bar. Beneath it, stone steps descend into darkness.',
+          },
+        },
         items: ['broken_necklace'],
         npcs: ['bartender'],
       },
@@ -82,6 +89,17 @@ export const SCENARIOS: Record<string, Scenario> = {
         exits: { east: 'street' },
         items: ['cigarette_butt'],
         npcs: ['informant'],
+      },
+      {
+        id: 'wine_cellar',
+        name: 'Hidden Wine Cellar',
+        description:
+          'A dusty cellar beneath the lounge. Old wine racks line the walls. ' +
+          'A private ledger sits on a makeshift desk — records of illicit dealings.',
+        exits: { up: 'lounge' },
+        isHidden: true,
+        items: ['hidden_ledger'],
+        npcs: [],
       },
     ],
     npcs: [
@@ -122,9 +140,10 @@ export const SCENARIOS: Record<string, Scenario> = {
     items: [
       { id: 'case_file', name: 'Case File', description: 'A manila folder with the missing person report.', roomId: 'office', isEvidence: false },
       { id: 'broken_necklace', name: 'Broken Necklace', description: 'A pearl necklace with a snapped clasp, found under a table.', roomId: 'lounge', isEvidence: true },
-      { id: 'diary', name: 'Singer\'s Diary', description: 'A leather-bound diary with the last entry dated the night she vanished.', roomId: 'backstage', isEvidence: true },
-      { id: 'matchbook', name: 'Matchbook', description: 'From "The Blue Flamingo" — an address is scrawled inside.', roomId: 'backstage', isEvidence: true },
-      { id: 'cigarette_butt', name: 'Cigarette Butt', description: 'An imported brand. Expensive taste for a dark alley.', roomId: 'alley', isEvidence: true },
+      { id: 'diary', name: 'Singer\'s Diary', description: 'A leather-bound diary with the last entry dated the night she vanished.', roomId: 'backstage', isEvidence: true, prerequisites: ['broken_necklace'], lockedDescription: 'The dressing room seems ordinary. Nothing catches your eye yet.' },
+      { id: 'matchbook', name: 'Matchbook', description: 'From "The Blue Flamingo" — an address is scrawled inside.', roomId: 'backstage', isEvidence: true, prerequisites: ['diary'], lockedDescription: 'You rummage around but find nothing of note.' },
+      { id: 'cigarette_butt', name: 'Cigarette Butt', description: 'An imported brand. Expensive taste for a dark alley.', roomId: 'alley', isEvidence: true, prerequisites: ['broken_necklace'], lockedDescription: 'Just trash. Nothing useful here.' },
+      { id: 'hidden_ledger', name: 'Hidden Ledger', description: 'A private ledger recording payoffs and smuggling routes through the lounge.', roomId: 'wine_cellar', isEvidence: false },
     ],
   },
 
@@ -229,8 +248,8 @@ export const SCENARIOS: Record<string, Scenario> = {
     items: [
       { id: 'welcome_letter', name: 'Welcome Letter', description: 'A formal invitation addressed to you, dated three weeks ago.', roomId: 'foyer', isEvidence: false },
       { id: 'old_journal', name: 'Old Journal', description: 'A journal describing rituals performed in the cellar.', roomId: 'library', isEvidence: true },
-      { id: 'silver_knife', name: 'Silver Knife', description: 'A ceremonial blade with dark stains on the edge.', roomId: 'dining_hall', isEvidence: true },
-      { id: 'torn_photograph', name: 'Torn Photograph', description: 'Half a photo showing the owner standing next to an unknown figure.', roomId: 'study', isEvidence: true },
+      { id: 'silver_knife', name: 'Silver Knife', description: 'A ceremonial blade with dark stains on the edge.', roomId: 'dining_hall', isEvidence: true, prerequisites: ['old_journal'], lockedDescription: 'An ornate knife, but you see nothing unusual about it yet.' },
+      { id: 'torn_photograph', name: 'Torn Photograph', description: 'Half a photo showing the owner standing next to an unknown figure.', roomId: 'study', isEvidence: true, prerequisites: ['old_journal'], lockedDescription: 'A cluttered desk. You would need to know what you are looking for.' },
       { id: 'locked_box', name: 'Locked Box', description: 'A small iron box engraved with the same symbols found in the cellar.', roomId: 'study', isEvidence: false },
     ],
   },
@@ -335,8 +354,8 @@ export const SCENARIOS: Record<string, Scenario> = {
     ],
     items: [
       { id: 'access_log', name: 'Access Log', description: 'A printout showing airlock activity during the night cycle.', roomId: 'bridge', isEvidence: true },
-      { id: 'sample_vial', name: 'Sample Vial', description: 'A cracked vial with a faintly glowing residue inside.', roomId: 'lab', isEvidence: true },
-      { id: 'research_notes', name: 'Research Notes', description: 'Handwritten notes describing an organism that responds to electrical signals.', roomId: 'lab', isEvidence: true },
+      { id: 'sample_vial', name: 'Sample Vial', description: 'A cracked vial with a faintly glowing residue inside.', roomId: 'lab', isEvidence: true, prerequisites: ['access_log'], lockedDescription: 'Lab samples line the shelves but nothing stands out yet.' },
+      { id: 'research_notes', name: 'Research Notes', description: 'Handwritten notes describing an organism that responds to electrical signals.', roomId: 'lab', isEvidence: true, prerequisites: ['sample_vial'], lockedDescription: 'Stacks of papers — without context, they mean nothing.' },
       { id: 'id_badge', name: 'Crew ID Badge', description: 'Belongs to Engineer Park, one of the missing crew members.', roomId: 'quarters', isEvidence: false },
       { id: 'dented_panel', name: 'Dented Panel', description: 'A section of airlock door warped outward by tremendous force.', roomId: 'cargo', isEvidence: false },
     ],
@@ -443,8 +462,8 @@ export const SCENARIOS: Record<string, Scenario> = {
       { id: 'broken_lock', name: 'Broken Lock', description: 'The lock from the captain\'s chest. It was picked cleanly.', roomId: 'captains_cabin', isEvidence: true },
       { id: 'rum_bottle', name: 'Rum Bottle', description: 'An empty bottle rolling on the cabin floor.', roomId: 'captains_cabin', isEvidence: false },
       { id: 'rope_fragment', name: 'Rope Fragment', description: 'A short piece of rope cut with a sharp blade.', roomId: 'main_deck', isEvidence: false },
-      { id: 'torn_cloth', name: 'Torn Cloth', description: 'A scrap of blue fabric caught on a cannon mount.', roomId: 'gun_deck', isEvidence: true },
-      { id: 'hidden_note', name: 'Hidden Note', description: 'A folded note reading: "Midnight. Island. Bring the map."', roomId: 'cargo_hold', isEvidence: true },
+      { id: 'torn_cloth', name: 'Torn Cloth', description: 'A scrap of blue fabric caught on a cannon mount.', roomId: 'gun_deck', isEvidence: true, prerequisites: ['broken_lock'], lockedDescription: 'Ropes and canvas everywhere — nothing catches your eye.' },
+      { id: 'hidden_note', name: 'Hidden Note', description: 'A folded note reading: "Midnight. Island. Bring the map."', roomId: 'cargo_hold', isEvidence: true, prerequisites: ['torn_cloth'], lockedDescription: 'Barrels and crates. You would need a lead to know where to look.' },
     ],
   },
 
@@ -550,8 +569,8 @@ export const SCENARIOS: Record<string, Scenario> = {
     items: [
       { id: 'whiskey_glass', name: 'Whiskey Glass', description: 'A half-finished glass of whiskey left on the bar.', roomId: 'saloon', isEvidence: false },
       { id: 'spent_casing', name: 'Spent Casing', description: 'A .45 caliber shell casing found near the sheriff\'s desk.', roomId: 'sheriff_office', isEvidence: true },
-      { id: 'sheriff_badge', name: 'Sheriff\'s Badge', description: 'A tin star lying on the floor, smeared with blood.', roomId: 'sheriff_office', isEvidence: true },
-      { id: 'receipt', name: 'Sales Receipt', description: 'A receipt for .45 ammunition sold at 8 PM the previous night.', roomId: 'general_store', isEvidence: true },
+      { id: 'sheriff_badge', name: 'Sheriff\'s Badge', description: 'A tin star lying on the floor, smeared with blood.', roomId: 'sheriff_office', isEvidence: true, prerequisites: ['spent_casing'], lockedDescription: 'The badge is on the floor, but you need to understand the scene first.' },
+      { id: 'receipt', name: 'Sales Receipt', description: 'A receipt for .45 ammunition sold at 8 PM the previous night.', roomId: 'general_store', isEvidence: true, prerequisites: ['spent_casing'], lockedDescription: 'Receipts and papers. Without knowing the caliber, these mean nothing.' },
       { id: 'horseshoe', name: 'Dropped Horseshoe', description: 'A horseshoe with a distinctive notch on one side.', roomId: 'stable', isEvidence: false },
     ],
   },
@@ -657,9 +676,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     items: [
       { id: 'data_chip', name: 'Data Chip', description: 'A tiny storage chip hidden under a bowl. It contains encrypted files.', roomId: 'noodle_bar', isEvidence: true },
       { id: 'burner_phone', name: 'Burner Phone', description: 'A disposable phone with one saved contact labeled "S".', roomId: 'market', isEvidence: false },
-      { id: 'encrypted_drive', name: 'Encrypted Drive', description: 'A portable drive with NovaCorp financial records on it.', roomId: 'server_room', isEvidence: true },
+      { id: 'encrypted_drive', name: 'Encrypted Drive', description: 'A portable drive with NovaCorp financial records on it.', roomId: 'server_room', isEvidence: true, prerequisites: ['data_chip'], lockedDescription: 'Dead servers and cables. You need a lead before you can find anything.' },
       { id: 'access_card', name: 'Access Card', description: 'A corporate keycard for NovaCorp upper floors.', roomId: 'server_room', isEvidence: false },
-      { id: 'shattered_tablet', name: 'Shattered Tablet', description: 'A broken tablet displaying a half-deleted message: "They know. Run."', roomId: 'penthouse', isEvidence: true },
+      { id: 'shattered_tablet', name: 'Shattered Tablet', description: 'A broken tablet displaying a half-deleted message: "They know. Run."', roomId: 'penthouse', isEvidence: true, prerequisites: ['encrypted_drive'], lockedDescription: 'The trashed apartment is a mess. You need more context to make sense of it.' },
     ],
   },
 };

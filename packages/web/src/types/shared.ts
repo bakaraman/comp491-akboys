@@ -21,12 +21,17 @@ export interface GameState {
   status: 'playing' | 'won' | 'lost';
   turnCount: number;
   discoveredEvidence: string[];
-  endReason?: 'solved' | 'wrong_accusation' | 'turn_limit' | 'fatal_choice';
+  endReason?: 'solved' | 'wrong_accusation' | 'turn_limit' | 'fatal_choice' | 'sanity_death';
 }
+
+export type PlayerRole = 'detective' | 'thief' | 'doctor' | 'journalist';
 
 export interface PlayerDataDTO {
   id: string;
   name: string;
+  role?: string;
+  sanity?: number;
+  maxSanity?: number;
   currentRoomId: string;
   inventory: string[];
   visitedRooms: string[];
@@ -74,6 +79,18 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string; targetPlayerId: string; content: string },
   ) => void;
   'evidence:share': (data: { sessionId: string; playerId: string; evidenceId: string }) => void;
+  'player:select-role': (
+    data: { sessionId: string; playerId: string; role: PlayerRole },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
+  'player:propose-accusation': (
+    data: { sessionId: string; playerId: string; suspectId: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
+  'player:vote-accusation': (
+    data: { sessionId: string; playerId: string; vote: 'guilty' | 'not_guilty' },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
 }
 
 export interface SessionStateDTO {
@@ -152,4 +169,33 @@ export interface ServerToClientEvents {
   'comm:message': (data: CommMessageDTO) => void;
   'players:updated': (data: { players: PlayerDataDTO[] }) => void;
   'evidence:shared': (data: SharedEvidenceEntry) => void;
+  'player:role-updated': (data: {
+    playerId: string;
+    playerName: string;
+    role: string;
+    allPlayers: PlayerDataDTO[];
+  }) => void;
+  'accusation:vote-started': (data: {
+    proposerId: string;
+    proposerName: string;
+    suspectId: string;
+    suspectName: string;
+    expiresAt: number;
+  }) => void;
+  'accusation:vote-result': (data: {
+    result: 'guilty' | 'not_guilty';
+    votes: Record<string, 'guilty' | 'not_guilty'>;
+    isCorrect?: boolean;
+    summary?: string;
+  }) => void;
+  'session:gameover': (data: {
+    status: 'won' | 'lost';
+    endReason: 'solved' | 'wrong_accusation' | 'turn_limit' | 'sanity_death';
+    summary: string;
+  }) => void;
+  'player:sanity-update': (data: {
+    playerId: string;
+    sanity: number;
+    delta: number;
+  }) => void;
 }

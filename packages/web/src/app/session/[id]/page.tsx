@@ -298,7 +298,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     async function init() {
       console.debug(`${DEBUG_PREFIX} init singleplayer start`, {
         sessionId,
-        scenarioId: sessionInfo.scenarioId,
+        scenarioId: sessionInfo?.scenarioId,
       });
 
       const r = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
@@ -1259,6 +1259,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             suspects={suspects}
             sharedEvidence={mp.sharedEvidence}
             onShareEvidence={mp.shareEvidence}
+            onProposeAccusation={(suspectId) => {
+              setIsJournalOpen(false);
+              void mp.proposeAccusation(suspectId);
+            }}
           />
         );
       })()}
@@ -1336,11 +1340,135 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
+      {/* Accusation Vote Banner (#25) */}
+      {mp.activeVote && (
+        <AccusationVoteBanner
+          vote={mp.activeVote}
+          isProposer={mp.activeVote.proposerId === mp.myPlayerId}
+          onVote={mp.voteAccusation}
+        />
+      )}
+
+      {/* Multiplayer Game Over Overlay (#25) */}
+      {mp.gameOver && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60,
+        }}>
+          <div style={{ textAlign: 'center', maxWidth: '520px', padding: '24px' }}>
+            <h1 style={{
+              color: mp.gameOver.status === 'won' ? '#d4a843' : '#d46868',
+              fontFamily: 'Georgia, serif',
+              fontStyle: 'italic',
+              fontSize: '44px',
+              marginBottom: '14px',
+            }}>
+              {mp.gameOver.status === 'won' ? 'Case Solved' : 'Case Lost'}
+            </h1>
+            <p style={{ color: '#9a9080', fontFamily: 'Georgia, serif', fontSize: '17px', lineHeight: '1.7', marginBottom: '28px' }}>
+              {mp.gameOver.summary}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              <a
+                href="/"
+                style={{ padding: '12px 22px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#b0a080', textDecoration: 'none', fontFamily: 'monospace', letterSpacing: '1px' }}
+              >
+                Home
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.2); } }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeInUp { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
       `}</style>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  AccusationVoteBanner component (#25)                               */
+/* ================================================================== */
+
+function AccusationVoteBanner({
+  vote,
+  isProposer,
+  onVote,
+}: {
+  vote: { proposerName: string; suspectName: string; expiresAt: number; myVote?: 'guilty' | 'not_guilty' };
+  isProposer: boolean;
+  onVote: (v: 'guilty' | 'not_guilty') => Promise<boolean>;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, []);
+  const secondsLeft = Math.max(0, Math.ceil((vote.expiresAt - now) / 1000));
+  const hasVoted = vote.myVote !== undefined;
+
+  return (
+    <div style={{
+      position: 'fixed', top: '72px', left: '50%', transform: 'translateX(-50%)',
+      backgroundColor: '#1a1510', border: '1px solid #d4a843',
+      borderRadius: '12px', padding: '16px 22px', zIndex: 60,
+      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+      minWidth: '360px', maxWidth: '520px',
+      animation: 'fadeInUp 0.3s ease',
+    }}>
+      <div style={{
+        fontFamily: 'monospace', fontSize: '10px', color: '#6a6050',
+        letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px',
+      }}>
+        Accusation Vote · {secondsLeft}s
+      </div>
+      <div style={{
+        fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e8e0d4',
+        marginBottom: '14px', lineHeight: '1.5',
+      }}>
+        <strong style={{ color: '#d4a843' }}>{vote.proposerName}</strong> accuses{' '}
+        <strong style={{ color: '#d46868' }}>{vote.suspectName}</strong>.
+        {isProposer ? ' Waiting for your teammates to vote.' : ' Cast your vote.'}
+      </div>
+      {hasVoted ? (
+        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#8a8070', textAlign: 'center' }}>
+          You voted: <strong style={{ color: vote.myVote === 'guilty' ? '#d46868' : '#5ba3cf' }}>{vote.myVote === 'guilty' ? 'GUILTY' : 'NOT GUILTY'}</strong> — waiting for others.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <button
+            onClick={() => void onVote('guilty')}
+            style={{
+              flex: 1, padding: '10px 18px', backgroundColor: '#2a1515',
+              border: '1px solid #d46868', borderRadius: '8px',
+              color: '#d46868', fontFamily: 'monospace', fontWeight: 'bold',
+              letterSpacing: '1.5px', textTransform: 'uppercase', fontSize: '12px',
+              cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#d46868'; e.currentTarget.style.color = '#0a0a0a'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#2a1515'; e.currentTarget.style.color = '#d46868'; }}
+          >
+            Guilty
+          </button>
+          <button
+            onClick={() => void onVote('not_guilty')}
+            style={{
+              flex: 1, padding: '10px 18px', backgroundColor: '#102030',
+              border: '1px solid #5ba3cf', borderRadius: '8px',
+              color: '#5ba3cf', fontFamily: 'monospace', fontWeight: 'bold',
+              letterSpacing: '1.5px', textTransform: 'uppercase', fontSize: '12px',
+              cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#5ba3cf'; e.currentTarget.style.color = '#0a0a0a'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#102030'; e.currentTarget.style.color = '#5ba3cf'; }}
+          >
+            Not Guilty
+          </button>
+        </div>
+      )}
     </div>
   );
 }

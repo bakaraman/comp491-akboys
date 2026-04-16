@@ -405,7 +405,7 @@ chatRouter.post('/new', requireAuth, (req: Request, res: Response) => {
 
     if (mode === 'multiplayer') {
       // Multiplayer: create with room code, scenario chosen later via voting
-      const clampedMax = Math.min(Math.max(Math.round(maxPlayers), 2), 4);
+      const clampedMax = Math.min(Math.max(Math.round(maxPlayers), 2), 5);
       const roomCode = generateRoomCode(store.existingRoomCodes);
       const session = store.create('__pending', clampedMax, roomCode);
       console.log(`${DEBUG_PREFIX} session:new multiplayer`, {

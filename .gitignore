@@ -45,3 +45,6 @@ __pycache__/
 README_KADIR.md
 CLAUDE_KADIR.md
 TODO.md
+
+# TypeScript build info
+packages/*/tsconfig.tsbuildinfo

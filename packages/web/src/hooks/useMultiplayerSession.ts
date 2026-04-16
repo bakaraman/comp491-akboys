@@ -95,6 +95,19 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     sharedByPlayerColor: string;
     timestamp: number;
   }>>([]);
+  const [activeVote, setActiveVote] = useState<{
+    proposerId: string;
+    proposerName: string;
+    suspectId: string;
+    suspectName: string;
+    expiresAt: number;
+    myVote?: 'guilty' | 'not_guilty';
+  } | null>(null);
+  const [gameOver, setGameOver] = useState<{
+    status: 'won' | 'lost';
+    endReason: 'solved' | 'wrong_accusation' | 'turn_limit' | 'sanity_death';
+    summary: string;
+  } | null>(null);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -294,6 +307,35 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       });
     });
 
+    /* -- Accusation voting events (#25) -- */
+    socket.on('accusation:vote-started', ({ proposerId, proposerName, suspectId, suspectName, expiresAt }) => {
+      setActiveVote({ proposerId, proposerName, suspectId, suspectName, expiresAt });
+      addMessage({
+        role: 'system',
+        content: `**${proposerName}** proposed accusing **${suspectName}**. All players must vote.`,
+        timestamp: Date.now(),
+      });
+    });
+
+    socket.on('accusation:vote-result', ({ result, isCorrect, summary }) => {
+      setActiveVote(null);
+      const label = result === 'guilty' ? 'GUILTY' : 'NOT GUILTY';
+      const verdict = summary ?? `Vote result: ${label}.`;
+      addMessage({
+        role: 'system',
+        content: isCorrect === undefined
+          ? verdict
+          : `${verdict} ${isCorrect ? '— The team was right.' : '— The team was wrong.'}`,
+        timestamp: Date.now(),
+      });
+    });
+
+    /* -- Game over (#25) -- */
+    socket.on('session:gameover', ({ status, endReason, summary }) => {
+      setGameOver({ status, endReason, summary });
+      setGameState('ended');
+    });
+
     /* -- Connect -- */
     socket.connect();
 
@@ -424,6 +466,34 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     [sessionId, myPlayerId],
   );
 
+  const proposeAccusation = useCallback(
+    async (suspectId: string): Promise<boolean> => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) { setError('Not connected to server'); return false; }
+      return new Promise((resolve) => {
+        socket.emit('player:propose-accusation', { sessionId, playerId: myPlayerId, suspectId }, (resp) => {
+          if (resp.success) { setError(null); resolve(true); }
+          else { setError(resp.error || 'Failed to propose accusation'); setToast(resp.error || 'Failed to propose accusation'); setTimeout(() => setToast(null), 3000); resolve(false); }
+        });
+      });
+    },
+    [sessionId, myPlayerId],
+  );
+
+  const voteAccusation = useCallback(
+    async (vote: 'guilty' | 'not_guilty'): Promise<boolean> => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) return false;
+      setActiveVote((prev) => (prev ? { ...prev, myVote: vote } : prev));
+      return new Promise((resolve) => {
+        socket.emit('player:vote-accusation', { sessionId, playerId: myPlayerId, vote }, (resp) => {
+          resolve(resp.success);
+        });
+      });
+    },
+    [sessionId, myPlayerId],
+  );
+
   /* ---- Return ---- */
 
   return {
@@ -445,6 +515,8 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     scenarioVotes,
     unreadComm,
     sharedEvidence,
+    activeVote,
+    gameOver,
 
     joinSession,
     selectScenario,
@@ -457,5 +529,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     clearUnreadComm,
     sendTyping,
     shareEvidence,
+    proposeAccusation,
+    voteAccusation,
   };
 }

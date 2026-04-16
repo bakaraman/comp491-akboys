@@ -19,11 +19,16 @@ export type {
   PlayerData,
   PlayerAction,
   PlayerColor,
+  PlayerRole,
+  RoleAbility,
   MultiplayerChatMessage,
   WorldStateEvent,
+  AccusationVote,
+  NPCState,
+  HiddenExit,
 } from './game.js';
 
-export { PLAYER_COLORS } from './game.js';
+export { PLAYER_COLORS, PLAYER_ROLES } from './game.js';
 
 export type {
   PlayerDataDTO,

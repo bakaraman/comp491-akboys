@@ -483,7 +483,6 @@ function SuspectCard({
   onProposeAccusation?: (suspectId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
 
   return (
     <div
@@ -548,36 +547,28 @@ function SuspectCard({
             Accuse
           </button>
         ) : (
-          <div style={{ position: 'relative', display: 'inline-block' }}>
-            <button
-              disabled
-              onMouseEnter={() => setTooltipVisible(true)}
-              onMouseLeave={() => setTooltipVisible(false)}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: 'transparent',
-                border: '1px solid #1a1815',
-                borderRadius: '6px', color: '#3a3530',
-                fontSize: '11px', fontFamily: 'monospace',
-                letterSpacing: '1px', textTransform: 'uppercase',
-                cursor: 'not-allowed',
-              }}
-            >
-              Propose Accusation
-            </button>
-            {tooltipVisible && (
-              <div style={{
-                position: 'absolute', bottom: '100%', left: 0,
-                marginBottom: '6px', padding: '8px 12px',
-                backgroundColor: '#1a1815', border: '1px solid #2a2520',
-                borderRadius: '6px', color: '#8a8070',
-                fontSize: '11px', fontFamily: 'monospace',
-                whiteSpace: 'nowrap', zIndex: 10,
-              }}>
-                Coming soon — waiting for backend
-              </div>
-            )}
-          </div>
+          <button
+            onClick={() => onProposeAccusation?.(npc.id)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: 'transparent',
+              border: '1px solid #3a2020',
+              borderRadius: '6px', color: '#d46868',
+              fontSize: '11px', fontFamily: 'monospace',
+              letterSpacing: '1px', textTransform: 'uppercase',
+              cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#2a1515';
+              e.currentTarget.style.borderColor = '#d46868';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.borderColor = '#3a2020';
+            }}
+          >
+            Propose Accusation
+          </button>
         )}
       </div>
     </div>

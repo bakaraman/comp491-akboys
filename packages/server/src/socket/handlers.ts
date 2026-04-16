@@ -2,13 +2,12 @@
  * handlers.ts — Socket.IO event handlers for multiplayer sessions
  *
  * Registers all real-time event listeners: player join, actions,
- * communication, typing, rejoin, and disconnect.
+ * communication, typing, rejoin, disconnect, role selection,
+ * accusation voting, and game-end mechanics.
  *
- * Action flow:  player:action → batcher → per-player narrator call →
- *               [RESPONSE] to actor, [OBSERVED] to same-room witnesses
- *
- * Communication flow:  comm:room / comm:direct → routed to targets only
- *                      (never touches narrator pipeline)
+ * Supports: roles (#18), NPC shared memory (#19), MP game end (#25),
+ *           evidence chains (#26), evidence fix (#27), sanity (#38),
+ *           NPC movement (#39), secret rooms (#40).
  *
  * @author AKBOYS Team
  * @since 2026-03-23
@@ -22,9 +21,11 @@ import type {
   PlayerData,
   PlayerAction,
   CommMessageDTO,
+  NPCState,
+  Scenario,
 } from '@akboys/shared';
 import { toPlayerDTO, SCENARIOS } from '@akboys/shared';
-import type { SessionStore } from '../store/SessionStore.js';
+import type { SessionStore, SessionData } from '../store/SessionStore.js';
 import { nextPlayerColor, serializeVotes } from '../store/SessionStore.js';
 import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
 import {
@@ -43,6 +44,9 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
 /** Maps a socket ID to the session and player it belongs to */
 const socketMap = new Map<string, { sessionId: string; playerId: string }>();
+
+/** Active accusation vote timers — stored separately so they survive serialization */
+const accusationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -103,6 +107,129 @@ function findSocketsInRoom(store: SessionStore, sessionId: string, roomId: strin
     }
   }
   return sockets;
+}
+
+/* ------------------------------------------------------------------ */
+/*  #25: Accusation vote resolution helper                             */
+/* ------------------------------------------------------------------ */
+
+function resolveAccusationVote(io: GameServer, store: SessionStore, sessionId: string): void {
+  const session = store.get(sessionId);
+  if (!session || !session.activeAccusation) return;
+
+  const accusation = session.activeAccusation;
+
+  // Clear timer
+  const timerId = accusationTimers.get(sessionId);
+  if (timerId) {
+    clearTimeout(timerId);
+    accusationTimers.delete(sessionId);
+  }
+
+  // Tally votes
+  let guiltyCount = 0;
+  let notGuiltyCount = 0;
+  const voteRecord: Record<string, 'guilty' | 'not_guilty'> = {};
+
+  for (const [pid, vote] of accusation.votes) {
+    voteRecord[pid] = vote;
+    if (vote === 'guilty') guiltyCount++;
+    else notGuiltyCount++;
+  }
+
+  const result: 'guilty' | 'not_guilty' = guiltyCount > notGuiltyCount ? 'guilty' : 'not_guilty';
+
+  if (result === 'guilty') {
+    // Check if accusation is correct
+    const scenario = SCENARIOS[session.scenarioId];
+    if (!scenario) return;
+
+    const isCorrectSuspect = accusation.suspectId === scenario.solution.culpritId;
+
+    // Check if team has found all required evidence (combined inventories + discovered)
+    const teamInventory = new Set<string>();
+    for (const p of session.players.values()) {
+      for (const item of p.inventory) teamInventory.add(item);
+    }
+    for (const eid of session.gameState.discoveredEvidence) {
+      teamInventory.add(eid);
+    }
+
+    const hasAllEvidence = scenario.solution.requiredEvidenceIds.every(
+      id => teamInventory.has(id),
+    );
+
+    const isCorrect = isCorrectSuspect && hasAllEvidence;
+
+    io.to(sessionId).emit('accusation:vote-result', {
+      result: 'guilty',
+      votes: voteRecord,
+      isCorrect,
+      summary: isCorrect
+        ? `The team correctly identified ${accusation.suspectName} as the culprit!`
+        : `The team accused ${accusation.suspectName}, but the case was not proven.`,
+    });
+
+    // End game
+    session.state = 'ended';
+    store.updateGameState(sessionId, {
+      isGameOver: true,
+      status: isCorrect ? 'won' : 'lost',
+      endReason: isCorrect ? 'solved' : 'wrong_accusation',
+    });
+
+    io.to(sessionId).emit('session:gameover', {
+      status: isCorrect ? 'won' : 'lost',
+      endReason: isCorrect ? 'solved' : 'wrong_accusation',
+      summary: isCorrect
+        ? `Congratulations! ${accusation.suspectName} was indeed the culprit. Case closed.`
+        : `Wrong accusation! ${accusation.suspectName} was not the culprit. The real criminal escapes.`,
+    });
+  } else {
+    // Not guilty — game continues
+    io.to(sessionId).emit('accusation:vote-result', {
+      result: 'not_guilty',
+      votes: voteRecord,
+      summary: 'The team voted not guilty. The investigation continues.',
+    });
+  }
+
+  // Clear active accusation
+  session.activeAccusation = null;
+  void store.sync(sessionId);
+
+  console.log(`[accusation] vote resolved for session ${sessionId.slice(0, 8)}: ${result} (${guiltyCount} guilty, ${notGuiltyCount} not guilty)`);
+}
+
+/* ------------------------------------------------------------------ */
+/*  #39: Periodic NPC movement helper                                  */
+/* ------------------------------------------------------------------ */
+
+function performNPCMovement(session: SessionData, scenario: Scenario): void {
+  if (!scenario) return;
+
+  for (const npc of scenario.npcs) {
+    const npcState = session.npcStates.get(npc.id);
+    if (!npcState) continue;
+
+    // 15% chance per turn to move
+    if (Math.random() < 0.15) {
+      const currentRoom = scenario.rooms.find(r => r.id === npcState.currentRoomId);
+      if (currentRoom) {
+        const exits = Object.values(currentRoom.exits);
+        // Filter out hidden rooms
+        const validExits = exits.filter(exitId => {
+          const room = scenario.rooms.find(r => r.id === exitId);
+          return room && !room.isHidden;
+        });
+        if (validExits.length > 0) {
+          const newRoomId = validExits[Math.floor(Math.random() * validExits.length)];
+          npcState.currentRoomId = newRoomId;
+          session.worldStateLog.push(`${npc.name} wandered to ${newRoomId}`);
+        }
+      }
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,6 +355,116 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
             }
             break;
           }
+          case 'DISCOVER': {
+            // #27 — Explicit evidence discovery
+            if (!session.gameState.discoveredEvidence.includes(directive.target)) {
+              session.gameState.discoveredEvidence.push(directive.target);
+            }
+            // Also add to player inventory so they "have" it
+            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
+            if (p && !p.inventory.includes(directive.target)) {
+              p.inventory.push(directive.target);
+            }
+            break;
+          }
+          case 'SANITY': {
+            // #38 — Sanity change
+            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
+            if (p) {
+              const delta = parseInt(directive.target, 10);
+              if (!isNaN(delta)) {
+                // Doctor role gets 50% sanity damage reduction (#18)
+                const actualDelta = (delta < 0 && p.role === 'doctor')
+                  ? Math.ceil(delta / 2)
+                  : delta;
+                const newSanity = Math.max(0, Math.min(p.maxSanity, p.sanity + actualDelta));
+                store.updatePlayer(sessionId, p.id, { sanity: newSanity });
+
+                // Notify the player
+                const playerSockets = findSocketsForPlayer(p.id);
+                for (const sid of playerSockets) {
+                  io.to(sid).emit('player:sanity-update', {
+                    playerId: p.id,
+                    sanity: newSanity,
+                    delta: actualDelta,
+                  });
+                }
+
+                // Game over if sanity reaches 0
+                if (newSanity <= 0) {
+                  for (const sid of playerSockets) {
+                    io.to(sid).emit('session:error', {
+                      message: 'Your mind shatters under the weight of what you have witnessed.',
+                    });
+                  }
+                  // In single-player, end the game
+                  if (session.maxPlayers === 1) {
+                    session.state = 'ended';
+                    store.updateGameState(sessionId, {
+                      isGameOver: true,
+                      status: 'lost',
+                      endReason: 'fatal_choice',
+                    });
+                    io.to(sessionId).emit('session:gameover', {
+                      status: 'lost',
+                      endReason: 'sanity_death',
+                      summary: `${p.name}'s mind could not withstand the horrors encountered. The investigation ends.`,
+                    });
+                  }
+                }
+              }
+            }
+            break;
+          }
+          case 'NPC_MOOD': {
+            // #19 — NPC disposition change
+            const npcState = session.npcStates.get(directive.target);
+            if (npcState && directive.detail) {
+              npcState.disposition = directive.detail as NPCState['disposition'];
+              // Also record who caused it
+              if (!npcState.metPlayers.includes(action.playerName)) {
+                npcState.metPlayers.push(action.playerName);
+              }
+            }
+            break;
+          }
+          case 'NPC_MEMORY': {
+            // #19 — NPC memory addition
+            const npcState = session.npcStates.get(directive.target);
+            if (npcState && directive.detail) {
+              npcState.memories.push(directive.detail);
+              // Keep max 20 memories per NPC
+              if (npcState.memories.length > 20) {
+                npcState.memories = npcState.memories.slice(-20);
+              }
+              if (!npcState.metPlayers.includes(action.playerName)) {
+                npcState.metPlayers.push(action.playerName);
+              }
+            }
+            break;
+          }
+          case 'NPC_MOVE': {
+            // #39 — NPC moves to a new room
+            const parts = directive.target.split(':');
+            if (parts.length === 2) {
+              const [npcId, newRoomId] = parts;
+              const npcState = session.npcStates.get(npcId);
+              if (npcState) {
+                npcState.currentRoomId = newRoomId;
+              }
+            }
+            break;
+          }
+          case 'DISCOVER_EXIT': {
+            // #40 — Discover hidden passage
+            const parts = directive.target.split(':');
+            if (parts.length === 2) {
+              const [roomId, exitDir] = parts;
+              const key = `${roomId}:hidden_exit:${exitDir}`;
+              session.objectStates.set(key, { discovered: true });
+            }
+            break;
+          }
           // Extended directives: update canonical objectStates
           case 'OPEN': {
             const key = `${action.roomId}:${directive.target}`;
@@ -291,10 +528,28 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // This catches cases where the AI describes finding an item but omits the PICKUP directive
       const actingPlayer = store.getPlayer(sessionId, action.playerId);
       if (actingPlayer) {
+        // Combined team knowledge for prerequisite checks (#26)
+        const teamKnowledge = new Set<string>();
+        for (const p of session.players.values()) {
+          for (const invId of p.inventory) teamKnowledge.add(invId);
+        }
+        for (const eid of session.gameState.discoveredEvidence) teamKnowledge.add(eid);
+
         const lowerResponse = privateResponse.toLowerCase();
+        const lowerAction = action.message.toLowerCase();
         const evidenceItems = scenario.items.filter((i) => i.isEvidence);
+        // Only trigger fallback if the player's action actually suggests interacting with the item
+        const lookVerbs = /\b(take|pick|grab|collect|find|examine|investigate|search|look|inspect|check|open|read)\b/;
+        const playerIntendsPickup = lookVerbs.test(lowerAction);
         for (const item of evidenceItems) {
           if (actingPlayer.inventory.includes(item.id)) continue;
+          // #26: skip locked items whose prerequisites aren't satisfied
+          if (item.prerequisites && item.prerequisites.length > 0) {
+            const prereqsMet = item.prerequisites.every((p) => teamKnowledge.has(p));
+            if (!prereqsMet) continue;
+          }
+          // Only trigger on player intent (avoid auto-pickup on casual mentions)
+          if (!playerIntendsPickup) continue;
           const itemName = item.name.toLowerCase();
           const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
           if (lowerResponse.includes(itemName) || lowerResponse.includes(itemIdWords)) {
@@ -311,7 +566,6 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
         // Also detect room movement from narrative if no MOVE directive was issued
         if (!directives.some((d) => d.type === 'MOVE')) {
-          const lowerAction = action.message.toLowerCase();
           const isMovement = /\b(go|walk|move|head|enter|leave|travel|climb)\b/.test(lowerAction);
           if (isMovement) {
             const freshPlayer = store.getPlayer(sessionId, action.playerId);
@@ -404,6 +658,27 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
     }
 
+    // ---- #25: Increment MP turn counter after each batch ----
+    session.mpTurnCount++;
+
+    if (scenario && session.mpTurnCount >= scenario.maxTurns && session.state === 'playing') {
+      session.state = 'ended';
+      store.updateGameState(sessionId, {
+        isGameOver: true,
+        status: 'lost',
+        endReason: 'turn_limit',
+      });
+      io.to(sessionId).emit('session:gameover', {
+        status: 'lost',
+        endReason: 'turn_limit',
+        summary: `Time's up! The investigation ran out of turns after ${scenario.maxTurns} rounds.`,
+      });
+      console.log(`[game] session ${sessionId.slice(0, 8)} ended: turn limit reached (${session.mpTurnCount}/${scenario.maxTurns})`);
+    }
+
+    // ---- #39: Periodic NPC movement after each batch ----
+    performNPCMovement(session, scenario);
+
     session.isStreaming = false;
     void store.sync(sessionId);
 
@@ -451,6 +726,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const player: PlayerData = {
         id: playerId,
         name: trimmedName,
+        role: undefined,       // #18: no role until selected
+        sanity: 100,           // #38: start at full sanity
+        maxSanity: 100,
         currentRoomId: startRoom,
         inventory: [],
         visitedRooms: [startRoom],
@@ -497,6 +775,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       const session = store.get(sessionId);
       if (!session) return;
+      if (session.state !== 'playing') return; // #25: no actions when game ended
 
       const player = store.getPlayer(sessionId, playerId);
       if (!player) return;
@@ -543,6 +822,38 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         playerName: player.name,
         isTyping,
       });
+    });
+
+    /* ================================================================ */
+    /*  #18: ROLE SELECTION                                              */
+    /* ================================================================ */
+
+    socket.on('player:select-role', (data, callback) => {
+      const { sessionId, playerId, role } = data;
+      const session = store.get(sessionId);
+      if (!session) { callback({ success: false, error: 'Session not found' }); return; }
+      if (session.state === 'playing') { callback({ success: false, error: 'Cannot change role during game' }); return; }
+
+      // Check role not taken already
+      const roleTaken = Array.from(session.players.values()).some(
+        p => p.id !== playerId && p.role === role,
+      );
+      if (roleTaken) { callback({ success: false, error: 'Role already taken by another player' }); return; }
+
+      store.updatePlayer(sessionId, playerId, { role });
+      callback({ success: true });
+
+      const player = store.getPlayer(sessionId, playerId);
+      const allPlayers = getAllPlayerDTOs(store, sessionId);
+      io.to(sessionId).emit('player:role-updated', {
+        playerId,
+        playerName: player?.name || 'Unknown',
+        role,
+        allPlayers,
+      });
+
+      void store.sync(sessionId);
+      console.log(`[socket] ${player?.name} selected role: ${role}`);
     });
 
     /* ================================================================ */
@@ -769,11 +1080,24 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       if (firstPlayer.id !== playerId) { callback({ success: false, error: 'Only the host can start the game' }); return; }
 
       session.state = 'playing';
-      void store.sync(sessionId);
-      callback({ success: true });
+      session.mpTurnCount = 0; // #25: reset turn counter
 
       const scenario = SCENARIOS[session.scenarioId];
-      if (!scenario) return;
+      if (!scenario) { callback({ success: false, error: 'Unknown scenario' }); return; }
+
+      // #19: Initialize NPC states from scenario
+      for (const npc of scenario.npcs) {
+        session.npcStates.set(npc.id, {
+          id: npc.id,
+          disposition: 'neutral',
+          memories: [],
+          metPlayers: [],
+          currentRoomId: npc.roomId,
+        });
+      }
+
+      void store.sync(sessionId);
+      callback({ success: true });
 
       const allPlayers = getAllPlayerDTOs(store, sessionId);
       io.to(sessionId).emit('game:started', { sessionId, scenarioTitle: scenario.title, players: allPlayers });
@@ -824,6 +1148,90 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       void store.sync(sessionId);
 
       console.log(`[game:start] opening narration complete for session ${sessionId.slice(0, 8)}`);
+    });
+
+    /* ================================================================ */
+    /*  #25: MULTIPLAYER ACCUSATION / VOTING                            */
+    /* ================================================================ */
+
+    socket.on('player:propose-accusation', (data, callback) => {
+      const { sessionId, playerId, suspectId } = data;
+      const session = store.get(sessionId);
+      if (!session) { callback({ success: false, error: 'Session not found' }); return; }
+      if (session.state !== 'playing') { callback({ success: false, error: 'Game not in progress' }); return; }
+      if (session.activeAccusation) { callback({ success: false, error: 'A vote is already in progress' }); return; }
+
+      const player = store.getPlayer(sessionId, playerId);
+      if (!player) { callback({ success: false, error: 'Player not found' }); return; }
+
+      // #18: Only detective role can propose (if roles are in use)
+      const rolesInUse = Array.from(session.players.values()).some(p => p.role);
+      if (rolesInUse && player.role !== 'detective') {
+        callback({ success: false, error: 'Only the Detective can propose accusations' });
+        return;
+      }
+
+      const scenario = SCENARIOS[session.scenarioId];
+      if (!scenario) { callback({ success: false, error: 'Scenario not found' }); return; }
+
+      const suspect = scenario.npcs.find(n => n.id === suspectId);
+      if (!suspect) { callback({ success: false, error: 'Invalid suspect' }); return; }
+
+      const VOTE_DURATION = 120_000; // 2 minutes
+      const expiresAt = Date.now() + VOTE_DURATION;
+
+      session.activeAccusation = {
+        proposerId: playerId,
+        proposerName: player.name,
+        suspectId,
+        suspectName: suspect.name,
+        votes: new Map(),
+        startedAt: Date.now(),
+        expiresAt,
+      };
+
+      // Auto-resolve timer
+      const timerId = setTimeout(() => {
+        resolveAccusationVote(io, store, sessionId);
+      }, VOTE_DURATION);
+      accusationTimers.set(sessionId, timerId);
+
+      callback({ success: true });
+
+      io.to(sessionId).emit('accusation:vote-started', {
+        proposerId: playerId,
+        proposerName: player.name,
+        suspectId,
+        suspectName: suspect.name,
+        expiresAt,
+      });
+
+      void store.sync(sessionId);
+      console.log(`[accusation] ${player.name} proposes: ${suspect.name} is guilty (session ${sessionId.slice(0, 8)})`);
+    });
+
+    socket.on('player:vote-accusation', (data, callback) => {
+      const { sessionId, playerId, vote } = data;
+      const session = store.get(sessionId);
+      if (!session) { callback({ success: false, error: 'Session not found' }); return; }
+      if (!session.activeAccusation) { callback({ success: false, error: 'No active vote' }); return; }
+      if (session.activeAccusation.votes.has(playerId)) {
+        callback({ success: false, error: 'Already voted — votes cannot be changed' });
+        return;
+      }
+
+      session.activeAccusation.votes.set(playerId, vote);
+      callback({ success: true });
+
+      // Check if all connected players have voted
+      const connectedPlayers = Array.from(session.players.values()).filter(p => p.isConnected);
+      const allVoted = connectedPlayers.every(p => session.activeAccusation!.votes.has(p.id));
+
+      if (allVoted) {
+        resolveAccusationVote(io, store, sessionId);
+      }
+
+      console.log(`[accusation] ${playerId.slice(0, 8)} voted ${vote} (${session.activeAccusation.votes.size}/${connectedPlayers.length})`);
     });
 
     /* ================================================================ */

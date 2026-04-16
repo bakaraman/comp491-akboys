@@ -226,7 +226,7 @@ export default function MultiplayerPage() {
               Number of Players
             </p>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-              {[2, 3, 4].map((n) => {
+              {[2, 3, 4, 5].map((n) => {
                 const isActive = maxPlayers === n;
                 return (
                   <button
