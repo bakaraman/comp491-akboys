@@ -1,9 +1,8 @@
 /**
- * session/[id]/page.tsx — Game session page
+ * session/[id]/page.tsx — Multiplayer noir session page
  *
- * Handles both single-player (SSE) and multiplayer (Socket.IO) modes.
- * Multiplayer phases: Loading → Name Entry → Voting (scenario pick) → Game.
- * Single player: Loading → Game (SSE streaming).
+ * Socket.IO driven. Phases: Loading → Name Entry → Lobby (host prompt +
+ * procedural world gen) → Playing → Finale cinematic.
  *
  * @author AKBOYS Team
  * @since 2026-03-12
@@ -33,16 +32,6 @@ import { NamePopup } from '@/components/NamePopup';
 import { authEnabled, getAuthHeaders, subscribeToAuth } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
-const DEBUG_PREFIX = '[session]';
-
-const SCENARIO_EMOJI: Record<string, string> = {
-  noir: '\uD83D\uDD75\uFE0F',
-  haunted: '\uD83D\uDC7B',
-  space: '\uD83D\uDE80',
-  pirate: '\uD83C\uDFF4\u200D\u2620\uFE0F',
-  western: '\uD83E\uDD20',
-  cyberpunk: '\uD83C\uDF03',
-};
 
 interface SessionInfo {
   id: string;
@@ -67,113 +56,6 @@ interface SessionInfo {
     sharedByPlayerColor: string;
     timestamp: number;
   }>;
-}
-
-interface ScenarioInfo {
-  id: string;
-  title: string;
-  setting: string;
-  synopsis: string;
-}
-
-/* ------------------------------------------------------------------ */
-/*  SSE helpers (single player)                                        */
-/* ------------------------------------------------------------------ */
-
-interface SPMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  imageUrl?: string;
-  isLoadingImage?: boolean;
-}
-
-async function consumeStream(
-  response: Response,
-  onChunk: (text: string) => void,
-): Promise<string> {
-  console.debug(`${DEBUG_PREFIX} stream response`, {
-    ok: response.ok,
-    status: response.status,
-    hasBody: !!response.body,
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error(`Streaming request failed with status ${response.status}`);
-  }
-
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let fullText = '';
-  let chunkCount = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      try {
-        const event = JSON.parse(line.slice(6));
-        if (event.type === 'session') {
-          console.debug(`${DEBUG_PREFIX} stream session`, event);
-        } else if (event.type === 'chunk') {
-          chunkCount += 1;
-          fullText += event.content;
-          if (chunkCount <= 5 || chunkCount % 25 === 0) {
-            console.debug(`${DEBUG_PREFIX} stream chunk`, {
-              chunkCount,
-              currentLength: fullText.length,
-              preview: fullText.slice(0, 120),
-            });
-          }
-          onChunk(fullText);
-        } else if (event.type === 'done' && typeof event.content === 'string') {
-          fullText = event.content;
-          console.debug(`${DEBUG_PREFIX} stream done`, {
-            chunkCount,
-            finalLength: fullText.length,
-            gameState: event.gameState,
-          });
-          onChunk(fullText);
-        }
-      } catch (error) {
-        console.warn(`${DEBUG_PREFIX} stream parse skip`, error);
-      }
-    }
-  }
-
-  console.debug(`${DEBUG_PREFIX} stream finished`, {
-    chunkCount,
-    finalLength: fullText.length,
-  });
-  return fullText;
-}
-
-async function fetchSuggestions(sessionId: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/chat/suggestions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-      body: JSON.stringify({ sessionId }),
-    });
-    const data = await res.json();
-    return data.suggestions || [];
-  } catch { return []; }
-}
-
-async function fetchGameState(sessionId: string): Promise<GameState | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/chat/session/${sessionId}/gamestate`, {
-      headers: await getAuthHeaders(),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -251,209 +133,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     prevGameStateRef.current = mp.gameState;
   }, [mp.gameState, isMultiplayer, refreshSessionInfo]);
 
-  /* ---- Single player state ---- */
-  const [spMessages, setSpMessages] = useState<SPMessage[]>([]);
-  const [spLoading, setSpLoading] = useState(false);
-  const [spSuggestions, setSpSuggestions] = useState<string[]>([]);
-  const [spGameState, setSpGameState] = useState<GameState | null>(null);
-  const [isAccuseOpen, setIsAccuseOpen] = useState(false);
+  /* ---- UI overlays (used by MP evidence/map) ---- */
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
-  const [selectedSuspect, setSelectedSuspect] = useState('');
-  const [spStatusMessage, setSpStatusMessage] = useState<string | null>(null);
-
-  const attachSceneImage = useCallback(async (text: string, messageIndex: number) => {
-    const roomMatch = text.match(/##\s+\**([^\n*]+)\**/);
-    if (!roomMatch) return;
-
-    const roomName = roomMatch[1].trim();
-
-    setSpMessages((prev) => {
-      const updated = [...prev];
-      if (updated[messageIndex]) {
-        updated[messageIndex] = { ...updated[messageIndex], isLoadingImage: true };
-      }
-      return updated;
-    });
-
-    try {
-      const res = await fetch(`${API_BASE}/api/chat/image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ sessionId, roomName }),
-      });
-      const data = await res.json();
-      setSpMessages((prev) => {
-        const updated = [...prev];
-        if (updated[messageIndex]) {
-          updated[messageIndex] = {
-            ...updated[messageIndex],
-            isLoadingImage: false,
-            imageUrl: data.imageUrl || undefined,
-          };
-        }
-        return updated;
-      });
-    } catch {
-      setSpMessages((prev) => {
-        const updated = [...prev];
-        if (updated[messageIndex]) {
-          updated[messageIndex] = { ...updated[messageIndex], isLoadingImage: false };
-        }
-        return updated;
-      });
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!sessionInfo || isMultiplayer) return;
-    let active = true;
-    const controller = new AbortController();
-
-    async function init() {
-      console.debug(`${DEBUG_PREFIX} init singleplayer start`, {
-        sessionId,
-        scenarioId: sessionInfo?.scenarioId,
-      });
-
-      const r = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
-        headers: await getAuthHeaders(),
-        signal: controller.signal,
-      });
-      const data = await r.json();
-      console.debug(`${DEBUG_PREFIX} session payload`, {
-        sessionId,
-        messageCount: data.messages?.length || 0,
-        gameState: data.gameState,
-      });
-
-      if (active) {
-        setSpGameState(data.gameState || null);
-      }
-      const visible = (data.messages || []).filter(
-        (m: SPMessage) => m.role !== 'user' || m.content !== 'Start the game. Describe where I am.',
-      );
-      if (visible.length > 0) {
-        console.debug(`${DEBUG_PREFIX} reusing existing visible messages`, {
-          sessionId,
-          visibleCount: visible.length,
-        });
-        if (active) {
-          setSpMessages(visible);
-          fetchSuggestions(sessionId).then(setSpSuggestions);
-        }
-      } else {
-        console.debug(`${DEBUG_PREFIX} no visible messages, requesting /start stream`, { sessionId });
-        if (active) {
-          setSpLoading(true);
-          setSpMessages([{ role: 'assistant', content: '' }]);
-        }
-        const streamRes = await fetch(`${API_BASE}/api/chat/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-          body: JSON.stringify({ sessionId }),
-          signal: controller.signal,
-        });
-        const fullText = await consumeStream(streamRes, (text) => {
-          if (active) {
-            setSpMessages([{ role: 'assistant', content: text }]);
-          }
-        });
-        if (active) {
-          setSpLoading(false);
-          fetchSuggestions(sessionId).then(setSpSuggestions);
-          fetchGameState(sessionId).then(setSpGameState);
-          attachSceneImage(fullText, 0);
-        }
-      }
-    }
-    init().catch((error) => {
-      if ((error as Error).name === 'AbortError') {
-        console.debug(`${DEBUG_PREFIX} singleplayer init aborted`, { sessionId });
-        return;
-      }
-      console.error(`${DEBUG_PREFIX} singleplayer init failed`, error);
-      if (active) {
-        setSpLoading(false);
-        setSpStatusMessage('Failed to load the session stream.');
-      }
-    });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [attachSceneImage, sessionInfo, isMultiplayer, sessionId]);
-
-  useEffect(() => {
-    if (!sessionInfo || isMultiplayer) return;
-    console.debug(`${DEBUG_PREFIX} singleplayer state`, {
-      sessionId,
-      messageCount: spMessages.length,
-      loading: spLoading,
-      lastMessagePreview: spMessages.at(-1)?.content?.slice(0, 120),
-    });
-  }, [isMultiplayer, sessionId, sessionInfo, spLoading, spMessages]);
-
-  const spSend = useCallback(async (text: string) => {
-    if (spLoading || spGameState?.status !== 'playing') return;
-    setSpMessages((prev) => [...prev, { role: 'user', content: text }]);
-    setSpLoading(true); setSpSuggestions([]);
-    try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({ sessionId, message: text }),
-      });
-      setSpMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
-      const assistantIndex = spMessages.length + 1;
-      const fullText = await consumeStream(res, (t) => {
-        setSpMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: t }; return u; });
-      });
-      fetchSuggestions(sessionId).then(setSpSuggestions);
-      fetchGameState(sessionId).then(setSpGameState);
-      attachSceneImage(fullText, assistantIndex);
-    } catch { setSpMessages((prev) => [...prev, { role: 'assistant', content: 'The narrator falls silent...' }]); }
-    finally { setSpLoading(false); }
-  }, [attachSceneImage, sessionId, spGameState?.status, spLoading, spMessages.length]);
-
-  const handleAccuse = useCallback(async () => {
-    if (!selectedSuspect) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/chat/accuse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({
-          sessionId,
-          suspectId: selectedSuspect,
-        }),
-      });
-      const data = await res.json();
-      if (data.summary) {
-        setSpMessages((prev) => [...prev, { role: 'assistant', content: data.summary }]);
-      }
-      if (data.gameState) {
-        setSpGameState(data.gameState);
-      } else {
-        fetchGameState(sessionId).then(setSpGameState);
-      }
-      setIsAccuseOpen(false);
-      setSelectedSuspect('');
-    } catch {
-      setSpStatusMessage('Accusation failed. Please try again.');
-    }
-  }, [selectedSuspect, sessionId]);
-
-  const handlePlayAgain = useCallback(async () => {
-    if (!sessionInfo) return;
-    const res = await fetch(`${API_BASE}/api/chat/new`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-      body: JSON.stringify({ scenarioId: sessionInfo.scenarioId, mode: 'singleplayer' }),
-    });
-    const data = await res.json();
-    if (data.sessionId) {
-      window.location.href = `/session/${data.sessionId}`;
-    }
-  }, [sessionInfo]);
 
   /* ---- Multiplayer lobby/voting state ---- */
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -481,18 +163,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }, [isMultiplayer, mp.isConnected, mp.myPlayerId, storedName, nameLoaded, autoJoinAttempted]);
   const [isStartingGame, setIsStartingGame] = useState(false);
-  const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commOpen, setCommOpen] = useState(false);
-
-  // Fetch scenarios for voting
-  useEffect(() => {
-    if (!isMultiplayer) return;
-    fetch(`${API_BASE}/api/chat/scenarios`)
-      .then((r) => r.json())
-      .then((data) => setScenarios(data.scenarios || []))
-      .catch(() => {});
-  }, [isMultiplayer]);
 
   const handleJoinWithName = useCallback(async (playerName: string) => {
     if (isJoining) return;
@@ -508,15 +180,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }, [isJoining, mp, setStoredName]);
 
   const handleStartGame = useCallback(async () => {
-    if (isStartingGame || !mp.selectedScenarioId) return;
+    if (isStartingGame) return;
     setIsStartingGame(true);
-    const confirmed = await mp.confirmScenario(mp.selectedScenarioId);
-    if (confirmed) {
-      const ok = await mp.startGame();
-      if (!ok) setIsStartingGame(false);
-    } else {
-      setIsStartingGame(false);
-    }
+    const ok = await mp.startGame();
+    if (!ok) setIsStartingGame(false);
   }, [isStartingGame, mp]);
 
   const handleLeave = useCallback(() => {
@@ -529,7 +196,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [mp.messages, mp.streamingText, spMessages]);
+  }, [mp.messages, mp.streamingText]);
 
   /* ---- Derived ---- */
   const myPlayer = mp.players.find((p) => p.id === mp.myPlayerId);
@@ -562,356 +229,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     );
   }
 
-  /* ================================================================ */
-  /*  RENDER: Single Player                                            */
-  /* ================================================================ */
-  if (!isMultiplayer) {
-    const emoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6';
-    const turnsLeft = Math.max(
-      0,
-      (sessionInfo.scenarioMeta?.maxTurns || 0) - (spGameState?.turnCount || 0),
-    );
-    const isGameOver = spGameState?.status && spGameState.status !== 'playing';
-    return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2520', backgroundColor: '#0d0d0d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '16px', color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
-              {emoji} {sessionInfo.scenarioTitle}
-            </span>
-            {sessionInfo.scenarioMeta && (
-              <span style={{
-                padding: '4px 10px',
-                borderRadius: '999px',
-                border: '1px solid #2a2520',
-                color: turnsLeft <= 2 ? '#d46868' : '#9a9080',
-                fontSize: '11px',
-                fontFamily: 'monospace',
-                letterSpacing: '1px',
-              }}>
-                TURNS LEFT {turnsLeft}
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {spGameState?.status === 'playing' && (
-              <button
-                onClick={() => setIsMapOpen(true)}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #2a3540',
-                  borderRadius: '6px',
-                  color: '#7a9ab8',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  letterSpacing: '1px',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7a9ab8'; e.currentTarget.style.color = '#9ab8d0'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
-              >
-                Map
-              </button>
-            )}
-            {spGameState?.status === 'playing' && (
-              <button
-                onClick={() => setIsJournalOpen(true)}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #2a3a2a',
-                  borderRadius: '6px',
-                  color: '#8aaa70',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  letterSpacing: '1px',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#8aaa70'; e.currentTarget.style.color = '#b0d090'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3a2a'; e.currentTarget.style.color = '#8aaa70'; }}
-              >
-                Journal
-              </button>
-            )}
-            {spGameState?.status === 'playing' && sessionInfo.scenarioMeta && (
-              <button
-                onClick={() => setIsAccuseOpen(true)}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #7a3232',
-                  borderRadius: '6px',
-                  color: '#d46868',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  letterSpacing: '1px',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                }}
-              >
-                Accuse
-              </button>
-            )}
-            <a href="/" style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', textDecoration: 'none', letterSpacing: '1px', textTransform: 'uppercase' }}>
-              New Game
-            </a>
-          </div>
-        </div>
-        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-          {spMessages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              role={msg.role}
-              content={msg.content}
-              imageUrl={msg.imageUrl}
-              isLoadingImage={msg.isLoadingImage}
-            />
-          ))}
-          {spLoading && <div style={{ color: '#4a4540', fontStyle: 'italic', fontSize: '14px', padding: '8px 0' }}>The narrator contemplates...</div>}
-        </div>
-        {spSuggestions.length > 0 && !spLoading && spGameState?.status === 'playing' && (
-          <div style={{ display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a' }}>
-            {spSuggestions.map((s, i) => (
-              <button key={i} onClick={() => spSend(s)} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '20px', color: '#b0a080', fontSize: '13px', fontFamily: 'Georgia, serif', fontStyle: 'italic', cursor: 'pointer', transition: 'all 0.2s' }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d4a843'; e.currentTarget.style.color = '#d4a843'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#b0a080'; }}
-              >{s}</button>
-            ))}
-          </div>
-        )}
-        {spStatusMessage && (
-          <div style={{ padding: '10px 20px', color: '#cf8a8a', fontSize: '12px', fontFamily: 'monospace' }}>
-            {spStatusMessage}
-          </div>
-        )}
-        <ChatInput onSend={spSend} disabled={spLoading || isGameOver} />
-
-        {isAccuseOpen && sessionInfo.scenarioMeta && (
-          <div style={{
-            position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.72)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60,
-          }}>
-            <div style={{
-              width: '100%', maxWidth: '460px', backgroundColor: '#111', border: '1px solid #2a2520',
-              borderRadius: '14px', padding: '28px',
-            }}>
-              <h2 style={{ color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0, marginBottom: '6px' }}>
-                {T.accuse.title}
-              </h2>
-              <p style={{ color: '#9a9080', fontSize: '13px', lineHeight: '1.6', marginBottom: '20px' }}>
-                {T.accuse.unanimousRequired}
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-                {sessionInfo.scenarioMeta.npcs.filter((npc) => (spGameState?.visitedRooms || []).includes(npc.roomId || '')).map((npc) => {
-                  const isSelected = selectedSuspect === npc.id;
-                  return (
-                    <button
-                      key={npc.id}
-                      onClick={() => setSelectedSuspect(npc.id)}
-                      style={{
-                        padding: '14px 16px',
-                        backgroundColor: isSelected ? '#1a1510' : '#0d0d0d',
-                        border: `2px solid ${isSelected ? '#d4a843' : '#1e1e1e'}`,
-                        borderRadius: '10px',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'all 0.2s',
-                        display: 'flex', alignItems: 'center', gap: '12px',
-                      }}
-                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = '#3a3530'; }}
-                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = '#1e1e1e'; }}
-                    >
-                      <div style={{
-                        width: '36px', height: '36px', borderRadius: '50%',
-                        backgroundColor: isSelected ? '#d4a843' : '#1a1815',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '16px', flexShrink: 0,
-                        transition: 'all 0.2s',
-                      }}>
-                        {isSelected ? '\u2713' : '\uD83D\uDC64'}
-                      </div>
-                      <div>
-                        <div style={{
-                          fontSize: '14px', fontFamily: 'Georgia, serif',
-                          color: isSelected ? '#d4a843' : '#b0a080',
-                          transition: 'color 0.2s',
-                        }}>
-                          {npc.name}
-                        </div>
-                        {npc.description && (
-                          <div style={{ fontSize: '11px', color: '#5a5545', fontFamily: 'monospace', marginTop: '2px' }}>
-                            {npc.description}
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  onClick={() => { setIsAccuseOpen(false); setSelectedSuspect(''); }}
-                  style={{ padding: '10px 20px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#6a6050', fontFamily: 'monospace', cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAccuse}
-                  disabled={!selectedSuspect}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: selectedSuspect ? '#7a2020' : '#1a1815',
-                    border: `1px solid ${selectedSuspect ? '#d46868' : '#2a2520'}`,
-                    borderRadius: '8px',
-                    color: selectedSuspect ? '#e8e0d4' : '#3a3530',
-                    fontFamily: 'monospace', fontWeight: 'bold',
-                    cursor: selectedSuspect ? 'pointer' : 'not-allowed',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  Confirm Accusation
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Evidence Board (SP) */}
-        {(() => {
-          const meta = sessionInfo.scenarioMeta;
-          const roomMap = Object.fromEntries((meta?.rooms || []).map((r) => [r.id, r.name]));
-          const allEvidence: EvidenceItem[] = (meta?.items || [])
-            .filter((i) => i.isEvidence)
-            .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
-          const visitedRooms = spGameState?.visitedRooms || [];
-          const suspects: SuspectInfo[] = (meta?.npcs || [])
-            .filter((npc) => visitedRooms.includes(npc.roomId || ''))
-            .map((npc) => ({
-              id: npc.id,
-              name: npc.name,
-              description: npc.description || '',
-              roomId: npc.roomId || '',
-              roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
-              visited: true,
-            }));
-          const discoveredIds = [
-            ...(spGameState?.discoveredEvidence || []),
-            ...(spGameState?.inventory || []),
-          ].filter((id, idx, arr) => arr.indexOf(id) === idx);
-          return (
-            <EvidenceBoard
-              mode="singleplayer"
-              isOpen={isJournalOpen}
-              onClose={() => setIsJournalOpen(false)}
-              allEvidence={allEvidence}
-              discoveredIds={discoveredIds}
-              suspects={suspects}
-              onAccuse={(suspectId) => {
-                setSelectedSuspect(suspectId);
-                setIsJournalOpen(false);
-                setIsAccuseOpen(true);
-              }}
-            />
-          );
-        })()}
-
-        {/* Game Map (SP) */}
-        {(() => {
-          const meta = sessionInfo.scenarioMeta;
-          const mapRooms: MapRoom[] = (meta?.rooms || []).map((r) => ({
-            id: r.id,
-            name: r.name,
-            exits: r.exits || {},
-          }));
-          const mapNpcs: MapNPC[] = (meta?.npcs || []).map((n) => ({
-            id: n.id,
-            name: n.name,
-            roomId: n.roomId || '',
-          }));
-          return (
-            <GameMap
-              isOpen={isMapOpen}
-              onClose={() => setIsMapOpen(false)}
-              scenarioId={sessionInfo.scenarioId}
-              rooms={mapRooms}
-              npcs={mapNpcs}
-              currentRoomId={spGameState?.currentRoomId || ''}
-              visitedRooms={spGameState?.visitedRooms || []}
-              onTravel={(roomName) => {
-                // Include direction for clearer AI interpretation
-                const currentRoom = mapRooms.find((r) => r.id === spGameState?.currentRoomId);
-                const targetRoom = mapRooms.find((r) => r.name === roomName);
-                let direction: string | null = null;
-                if (currentRoom && targetRoom) {
-                  for (const [dir, roomId] of Object.entries(currentRoom.exits)) {
-                    if (roomId === targetRoom.id) {
-                      direction = dir;
-                      break;
-                    }
-                  }
-                }
-                const command = direction
-                  ? `I go ${direction} to the ${roomName}.`
-                  : `I go to the ${roomName}.`;
-                void spSend(command);
-              }}
-              disabled={spLoading || isGameOver}
-            />
-          );
-        })()}
-
-        {isGameOver && (
-          <div style={{
-            position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.82)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
-          }}>
-            <div style={{ textAlign: 'center', maxWidth: '480px', padding: '24px' }}>
-              <h1 style={{
-                color: spGameState?.status === 'won' ? '#d4a843' : '#d46868',
-                fontFamily: 'Georgia, serif',
-                fontStyle: 'italic',
-                fontSize: '40px',
-                marginBottom: '10px',
-              }}>
-                {spGameState?.status === 'won' ? 'Mystery Solved' : 'Game Over'}
-              </h1>
-              <p style={{ color: '#9a9080', fontFamily: 'Georgia, serif', fontSize: '16px', lineHeight: '1.7', marginBottom: '24px' }}>
-                {spGameState?.endReason === 'solved' && 'You found the truth and closed the case.'}
-                {spGameState?.endReason === 'wrong_accusation' && 'The accusation was wrong. The case slipped through your hands.'}
-                {spGameState?.endReason === 'turn_limit' && 'Time ran out before the case could be solved.'}
-              </p>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
-                <a
-                  href="/"
-                  style={{ padding: '12px 18px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#b0a080', textDecoration: 'none', fontFamily: 'monospace' }}
-                >
-                  Home
-                </a>
-                <button
-                  onClick={handlePlayAgain}
-                  style={{ padding: '12px 18px', backgroundColor: '#d4a843', border: 'none', borderRadius: '8px', color: '#0a0a0a', fontFamily: 'monospace', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  Play Again
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   /* ================================================================ */
   /*  MULTIPLAYER RENDERS BELOW                                        */
   /* ================================================================ */
 
   const roomCode = sessionInfo.roomCode || '';
-  void SCENARIO_EMOJI; // kept for future re-use / emoji mapping
 
   /* ================================================================ */
   /*  RENDER: Joining / Name entry (pre-join)                          */
@@ -980,8 +303,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /*  RENDER: Multiplayer Game                                         */
   /* ================================================================ */
   const typingNames = Array.from(mp.typingPlayers.values());
-  const gameScenarioTitle = scenarios.find((s) => s.id === sessionInfo.scenarioId)?.title || sessionInfo.scenarioTitle;
-  const gameEmoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || (mp.selectedScenarioId ? SCENARIO_EMOJI[mp.selectedScenarioId] : '') || '\uD83D\uDCD6';
+  const gameScenarioTitle = mp.worldMeta?.title || sessionInfo.scenarioTitle;
+  const gameEmoji = '\uD83D\uDD75\uFE0F';
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>

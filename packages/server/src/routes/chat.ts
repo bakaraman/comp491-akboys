@@ -583,28 +583,11 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
       format: 'wav',
     });
 
+    const buf = Buffer.from(await ttsRes.arrayBuffer());
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    if (!ttsRes.body) {
-      const buf = Buffer.from(await ttsRes.arrayBuffer());
-      res.send(buf);
-      return;
-    }
-
-    const reader = (ttsRes.body as ReadableStream<Uint8Array>).getReader();
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) res.write(Buffer.from(value));
-      }
-      res.end();
-    } catch (err) {
-      console.error(`${DEBUG_PREFIX} tts stream error`, err);
-      try { res.end(); } catch { /* */ }
-    }
+    res.setHeader('Content-Length', String(buf.length));
+    res.end(buf);
   } catch (err) {
     console.error(`${DEBUG_PREFIX} tts error`, err);
     if (!res.headersSent) res.status(500).json({ error: 'TTS failed' });
