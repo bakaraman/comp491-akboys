@@ -173,15 +173,9 @@ function resolveAccusationVote(io: GameServer, store: SessionStore, sessionId: s
 
   const isCorrectSuspect = accusation.suspectId === scenario.solution.culpritId;
 
-  // Team must have all required evidence (inventory OR discoveredEvidence)
-  const teamEvidence = new Set<string>();
-  for (const p of session.players.values()) {
-    for (const itemId of p.inventory) teamEvidence.add(itemId);
-  }
-  for (const eid of session.gameState.discoveredEvidence) teamEvidence.add(eid);
-  const hasAllEvidence = scenario.solution.requiredEvidenceIds.every((id) => teamEvidence.has(id));
-
-  const isCorrect = isCorrectSuspect && hasAllEvidence;
+  // Accusation is correct iff the suspect matches the culprit.
+  // No evidence-gating — it's up to the team to have deduced narratively.
+  const isCorrect = isCorrectSuspect;
 
   const roomSockets = io.sockets.adapter.rooms.get(sessionId);
   console.log(`[accusation] emitting vote-result+gameover to room ${sessionId.slice(0, 8)}: ${roomSockets?.size ?? 0} sockets`);
@@ -269,8 +263,8 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const player = store.getPlayer(sessionId, action.playerId);
       if (!player) continue;
 
-      // Build per-player prompt with current canonical state
-      const systemPrompt = buildPlayerActionPrompt(scenario, session, action.playerName, action.roomId);
+      // Build per-player prompt with current canonical state + world context
+      const systemPrompt = buildPlayerActionPrompt(scenario, session, action.playerName, action.roomId, session.world ?? null);
       const actionMsg = `[${action.playerName} / ${action.roomId}] "${action.message}"`;
 
       // Store action in history (scoped to actor)
@@ -356,206 +350,39 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           continue;
         }
 
-        // Apply validated state mutation
-        switch (directive.type) {
-          case 'MOVE': {
-            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
-            if (p) {
-              const newVisited = p.visitedRooms.includes(directive.target)
-                ? p.visitedRooms
-                : [...p.visitedRooms, directive.target];
-              store.updatePlayer(sessionId, p.id, {
-                currentRoomId: directive.target,
-                visitedRooms: newVisited,
-              });
-            }
-            break;
+        // Apply validated state mutation — only MOVE is tracked now.
+        // Everything else (inventory, evidence, sanity, NPC mood) lives in
+        // narrative only; the narrator is sole authority.
+        if (directive.type === 'MOVE') {
+          const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
+          if (p) {
+            const newVisited = p.visitedRooms.includes(directive.target)
+              ? p.visitedRooms
+              : [...p.visitedRooms, directive.target];
+            store.updatePlayer(sessionId, p.id, {
+              currentRoomId: directive.target,
+              visitedRooms: newVisited,
+            });
           }
-          case 'PICKUP': {
-            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
-            if (p && !p.inventory.includes(directive.target)) {
-              store.updatePlayer(sessionId, p.id, {
-                inventory: [...p.inventory, directive.target],
-              });
-            }
-            break;
-          }
-          case 'DISCOVER': {
-            // #27 — Explicit evidence discovery
-            if (!session.gameState.discoveredEvidence.includes(directive.target)) {
-              session.gameState.discoveredEvidence.push(directive.target);
-            }
-            // Also add to player inventory so they "have" it
-            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
-            if (p && !p.inventory.includes(directive.target)) {
-              p.inventory.push(directive.target);
-            }
-            break;
-          }
-          case 'SANITY': {
-            // #38 — Sanity change
-            const p = Array.from(session.players.values()).find((pl) => pl.name === directive.playerName);
-            if (p) {
-              const delta = parseInt(directive.target, 10);
-              if (!isNaN(delta)) {
-                // Doctor role gets 50% sanity damage reduction (#18)
-                const actualDelta = (delta < 0 && p.role === 'doctor')
-                  ? Math.ceil(delta / 2)
-                  : delta;
-                const newSanity = Math.max(0, Math.min(p.maxSanity, p.sanity + actualDelta));
-                store.updatePlayer(sessionId, p.id, { sanity: newSanity });
-
-                // Notify the player
-                const playerSockets = findSocketsForPlayer(p.id);
-                for (const sid of playerSockets) {
-                  io.to(sid).emit('player:sanity-update', {
-                    playerId: p.id,
-                    sanity: newSanity,
-                    delta: actualDelta,
-                  });
-                }
-
-                // Game over if sanity reaches 0
-                if (newSanity <= 0) {
-                  for (const sid of playerSockets) {
-                    io.to(sid).emit('session:error', {
-                      message: 'Your mind shatters under the weight of what you have witnessed.',
-                    });
-                  }
-                  // In single-player, end the game
-                  if (session.maxPlayers === 1) {
-                    session.state = 'ended';
-                    store.updateGameState(sessionId, {
-                      isGameOver: true,
-                      status: 'lost',
-                      endReason: 'fatal_choice',
-                    });
-                    io.to(sessionId).emit('session:gameover', {
-                      status: 'lost',
-                      endReason: 'sanity_death',
-                      summary: `${p.name}'s mind could not withstand the horrors encountered. The investigation ends.`,
-                    });
-                  }
-                }
-              }
-            }
-            break;
-          }
-          case 'NPC_MOOD': {
-            // #19 — NPC disposition change
-            const npcState = session.npcStates.get(directive.target);
-            if (npcState && directive.detail) {
-              npcState.disposition = directive.detail as NPCState['disposition'];
-              // Also record who caused it
-              if (!npcState.metPlayers.includes(action.playerName)) {
-                npcState.metPlayers.push(action.playerName);
-              }
-            }
-            break;
-          }
-          case 'NPC_MEMORY': {
-            // #19 — NPC memory addition
-            const npcState = session.npcStates.get(directive.target);
-            if (npcState && directive.detail) {
-              npcState.memories.push(directive.detail);
-              // Keep max 20 memories per NPC
-              if (npcState.memories.length > 20) {
-                npcState.memories = npcState.memories.slice(-20);
-              }
-              if (!npcState.metPlayers.includes(action.playerName)) {
-                npcState.metPlayers.push(action.playerName);
-              }
-            }
-            break;
-          }
-          case 'NPC_MOVE': {
-            // #39 — NPC moves to a new room
-            const parts = directive.target.split(':');
-            if (parts.length === 2) {
-              const [npcId, newRoomId] = parts;
-              const npcState = session.npcStates.get(npcId);
-              if (npcState) {
-                npcState.currentRoomId = newRoomId;
-              }
-            }
-            break;
-          }
-          case 'DISCOVER_EXIT': {
-            // #40 — Discover hidden passage
-            const parts = directive.target.split(':');
-            if (parts.length === 2) {
-              const [roomId, exitDir] = parts;
-              const key = `${roomId}:hidden_exit:${exitDir}`;
-              session.objectStates.set(key, { discovered: true });
-            }
-            break;
-          }
-          // Extended directives: update canonical objectStates
-          case 'OPEN': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, open: true, closed: false });
-            break;
-          }
-          case 'CLOSE': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, open: false, closed: true });
-            break;
-          }
-          case 'UNLOCK': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, locked: false, unlocked: true });
-            break;
-          }
-          case 'BREAK': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, broken: true });
-            break;
-          }
-          case 'REVEAL': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, revealed: true, hidden: false });
-            break;
-          }
-          case 'USE':
-          case 'REMOVE': {
-            const key = `${action.roomId}:${directive.target}`;
-            const current = session.objectStates.get(key) || {};
-            session.objectStates.set(key, { ...current, used: true, removed: directive.type === 'REMOVE' });
-            break;
-          }
-          case 'STATE': {
-            // Generic state change — store with the target as key
-            const key = `${action.roomId}:${directive.target.replace(/\s+/g, '_').slice(0, 50)}`;
-            session.objectStates.set(key, { changed: true });
-            break;
-          }
-          default:
-            break;
         }
 
-        // Log to world state (both human-readable and structured)
         if (result.worldLogEntry) {
           session.worldStateLog.push(result.worldLogEntry);
         }
         if (result.worldStateEvent) {
           session.worldStateEvents.push(result.worldStateEvent);
         }
-
         console.log(`[directive] APPLIED: ${directive.type} ${directive.playerName} -> ${directive.target}`);
       }
 
-      // Fallback evidence detection: scan narrative for item names (like SP does)
-      // This catches cases where the AI describes finding an item but omits the PICKUP directive
-      const actingPlayer = store.getPlayer(sessionId, action.playerId);
-      // Note: AI narrator is the sole authority for movement and item pickups.
-      // No regex-based fallback heuristics — if the narrator missed a directive,
-      // it missed it. Trust the AI to emit MOVE/PICKUP/DISCOVER correctly.
-      void actingPlayer;
+      // Also append a narrator-response preview line to the world log so the
+      // finale prompt has real story context (since we don't track pickups).
+      {
+        const preview = privateResponse.replace(/\n+/g, ' ').slice(0, 200);
+        session.worldStateLog.push(
+          `Turn ${session.gameState.turnCount}: ${action.playerName} in ${action.roomId} — "${action.message.slice(0, 80)}" → ${preview}`,
+        );
+      }
 
       // Velvet Shadow v2: same-room players share the FULL narrator response
       // (observed summaries removed — every player in this room sees what the
@@ -1100,10 +927,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           world: {
             title: result.world.meta.title,
             setting: result.world.meta.setting,
-            centralMystery: result.world.meta.centralMystery,
             openingNarration: result.world.openingNarration,
-            ambientTrack: result.world.meta.ambientTrack,
-            tone: result.world.meta.tone,
           },
           rooms,
           npcs,

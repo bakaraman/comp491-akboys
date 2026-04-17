@@ -65,12 +65,10 @@ Do NOT use list items, headers, or markdown. Prose only. Separate the two paragr
   const truthBlock = `WORLD:
 Title: ${world.meta.title}
 Setting: ${world.meta.setting}
-Central mystery: ${world.meta.centralMystery}
 
 TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (role: ${culprit?.role ?? 'unknown'})
 TRUE MOTIVE: ${world.solution.motiveShort}
-KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}
-WHAT ACTUALLY HAPPENED: ${world.whatReallyHappened}`;
+KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}`;
 
   const logBlock = worldStateLog.length
     ? `WORLD STATE LOG (actual team actions, most recent last):\n${worldStateLog.slice(-30).map((e) => `- ${e}`).join('\n')}`

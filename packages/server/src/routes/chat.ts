@@ -472,13 +472,7 @@ chatRouter.post('/accuse', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const foundAllRequiredEvidence = scenario.solution.requiredEvidenceIds.every((id) =>
-      session.gameState.discoveredEvidence.includes(id) || session.gameState.inventory.includes(id),
-    );
-
-    const isCorrectAccusation =
-      suspectId === scenario.solution.culpritId &&
-      foundAllRequiredEvidence;
+    const isCorrectAccusation = suspectId === scenario.solution.culpritId;
 
     store.updateGameState(sessionId, {
       isGameOver: true,
@@ -621,7 +615,7 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
       }
       const culpritName = session.world.npcs.find((n) => n.id === session.world!.solution.culpritNpcId)?.name || null;
-      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, culpritName, whatReallyHappened: session.world.whatReallyHappened, players: playerNames })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, culpritName, players: playerNames })}\n\n`);
       console.log(`[finale ${sessionId.slice(0, 8)}] ✓ stream done (${fullText.length} chars, culprit=${culpritName})`);
       res.end();
     } catch (err) {

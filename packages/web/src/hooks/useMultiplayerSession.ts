@@ -88,13 +88,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioVotes, setScenarioVotes] = useState<Record<string, string[]>>({});
   const [unreadComm, setUnreadComm] = useState(0);
-  const [sharedEvidence, setSharedEvidence] = useState<Array<{
-    evidenceId: string;
-    sharedByPlayerId: string;
-    sharedByPlayerName: string;
-    sharedByPlayerColor: string;
-    timestamp: number;
-  }>>([]);
   const [activeVote, setActiveVote] = useState<{
     proposerId: string;
     proposerName: string;
@@ -115,10 +108,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   const [worldMeta, setWorldMeta] = useState<{
     title: string;
     setting: string;
-    centralMystery: string;
     openingNarration: string;
-    ambientTrack: string;
-    tone: string;
     openingImageUrl: string | null;
     rooms: Array<{ id: string; name: string; exits: Record<string, string | null> }>;
     npcs: Array<{ id: string; name: string; role: string }>;
@@ -272,7 +262,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
       if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
       if (session.commHistory) setCommMessages(session.commHistory);
-      if (session.sharedEvidence) setSharedEvidence(session.sharedEvidence);
 
       // Rebuild message history — server already filtered for this player
       const restored: DisplayMessage[] = session.history.map((m, i) => ({
@@ -317,14 +306,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setPlayers(updatedPlayers);
     });
 
-    /* -- Evidence sharing events -- */
-    socket.on('evidence:shared', (entry) => {
-      setSharedEvidence((prev) => {
-        if (prev.some((s) => s.evidenceId === entry.evidenceId)) return prev;
-        return [...prev, entry];
-      });
-    });
-
     /* -- Accusation voting events (#25) -- */
     socket.on('accusation:vote-started', ({ proposerId, proposerName, suspectId, suspectName, expiresAt }) => {
       setActiveVote({ proposerId, proposerName, suspectId, suspectName, expiresAt });
@@ -364,10 +345,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setWorldMeta({
         title: data.world.title,
         setting: data.world.setting,
-        centralMystery: data.world.centralMystery,
         openingNarration: data.world.openingNarration,
-        ambientTrack: data.world.ambientTrack,
-        tone: data.world.tone,
         openingImageUrl: data.openingImageUrl,
         rooms: data.rooms,
         npcs: data.npcs,
@@ -507,15 +485,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     [sessionId, myPlayerId],
   );
 
-  const shareEvidence = useCallback(
-    (evidenceId: string) => {
-      const socket = socketRef.current;
-      if (!socket?.connected || !myPlayerId) return;
-      socket.emit('evidence:share', { sessionId, playerId: myPlayerId, evidenceId });
-    },
-    [sessionId, myPlayerId],
-  );
-
   const proposeAccusation = useCallback(
     async (suspectId: string): Promise<boolean> => {
       const socket = socketRef.current;
@@ -583,7 +552,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     selectedScenarioId,
     scenarioVotes,
     unreadComm,
-    sharedEvidence,
     activeVote,
     gameOver,
     storyStatus,
@@ -601,7 +569,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     sendDirectMessage,
     clearUnreadComm,
     sendTyping,
-    shareEvidence,
     proposeAccusation,
     voteAccusation,
     generateStory,

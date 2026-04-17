@@ -211,10 +211,7 @@ export interface ServerToClientEvents {
     world: {
       title: string;
       setting: string;
-      centralMystery: string;
       openingNarration: string;
-      ambientTrack: string;
-      tone: string;
     };
     rooms: Array<{
       id: string;

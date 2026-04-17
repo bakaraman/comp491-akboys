@@ -21,14 +21,6 @@ const DEFAULT_MAX_TURNS = 40;
  * and the result is cached on session for subsequent prompt builds.
  */
 export function worldToScenario(world: WorldData): Scenario {
-  // Build room → items, room → npcs reverse indices based on world.rooms
-  const npcsByRoom: Record<string, string> = {};
-  const itemsByRoom: Record<string, string> = {};
-  for (const r of world.rooms) {
-    for (const iid of r.itemIds) itemsByRoom[iid] = r.id;
-    for (const nid of r.npcIds) npcsByRoom[nid] = r.id;
-  }
-
   const rooms: Room[] = world.rooms.map((r) => {
     const exitsFiltered: Record<string, string> = {};
     for (const [dir, target] of Object.entries(r.exits)) {
@@ -39,8 +31,8 @@ export function worldToScenario(world: WorldData): Scenario {
       name: r.name,
       description: r.description,
       exits: exitsFiltered,
-      items: [...r.itemIds],
-      npcs: [...r.npcIds],
+      items: world.items.filter((i) => i.roomId === r.id).map((i) => i.id),
+      npcs: world.npcs.filter((n) => n.roomId === r.id).map((n) => n.id),
     };
   });
 
@@ -48,7 +40,7 @@ export function worldToScenario(world: WorldData): Scenario {
     id: n.id,
     name: n.name,
     description: n.description,
-    roomId: npcsByRoom[n.id] ?? world.rooms[0]?.id ?? '',
+    roomId: n.roomId,
     dialogue: [n.alibiClaim],
   }));
 
@@ -56,7 +48,7 @@ export function worldToScenario(world: WorldData): Scenario {
     id: i.id,
     name: i.name,
     description: i.description,
-    roomId: itemsByRoom[i.id] ?? world.rooms[0]?.id ?? '',
+    roomId: i.roomId,
     isEvidence: i.isEvidence,
   }));
 
@@ -66,12 +58,12 @@ export function worldToScenario(world: WorldData): Scenario {
     rooms,
     npcs,
     items,
-    synopsis: world.meta.centralMystery,
+    synopsis: world.meta.setting,
     maxTurns: DEFAULT_MAX_TURNS,
     solution: {
       culpritId: world.solution.culpritNpcId,
       evidenceId: world.solution.keyEvidenceId,
-      requiredEvidenceIds: [...world.solution.requiredEvidenceIds],
+      requiredEvidenceIds: [world.solution.keyEvidenceId],
     },
   };
 }

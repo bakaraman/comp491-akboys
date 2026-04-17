@@ -25,10 +25,7 @@ async function main() {
   console.log('\n--- META ---');
   console.log('title:', result.world.meta.title);
   console.log('setting:', result.world.meta.setting);
-  console.log('centralMystery:', result.world.meta.centralMystery);
-  console.log('tone:', result.world.meta.tone);
   console.log('visualStylePrompt:', result.world.meta.visualStylePrompt);
-  console.log('ambientTrack:', result.world.meta.ambientTrack);
 
   console.log('\n--- ROOMS ---');
   result.world.rooms.forEach((r) => {
@@ -39,15 +36,15 @@ async function main() {
 
   console.log('\n--- NPCS ---');
   result.world.npcs.forEach((n) => {
-    console.log(`  [${n.id}] ${n.name} (${n.role}) ${n.isCulprit ? '⚠️ CULPRIT' : ''}`);
+    console.log(`  [${n.id}] ${n.name} (${n.role}, in ${n.roomId}) ${n.isCulprit ? 'CULPRIT' : ''}`);
     console.log(`    alibi: ${n.alibiClaim.slice(0, 100)}`);
+    console.log(`    knownInfo: ${n.knownInfo.slice(0, 100)}`);
     console.log(`    hidden: ${n.hiddenSecret ? n.hiddenSecret.slice(0, 100) : '(none)'}`);
   });
 
   console.log('\n--- ITEMS ---');
   result.world.items.forEach((i) => {
-    console.log(`  [${i.id}] ${i.name} ${i.isEvidence ? '🔍 EVIDENCE' : ''} ${i.pointsToNpcId ? `→ ${i.pointsToNpcId}` : ''}`);
-    if (i.prerequisiteItemIds.length) console.log(`    prereqs: ${i.prerequisiteItemIds.join(', ')}`);
+    console.log(`  [${i.id}] ${i.name} (in ${i.roomId}) ${i.isEvidence ? 'EVIDENCE' : ''}`);
   });
 
   console.log('\n--- ENTRY SCENES ---');
@@ -63,10 +60,6 @@ async function main() {
   console.log('culprit:', result.world.solution.culpritNpcId);
   console.log('motive:', result.world.solution.motiveShort);
   console.log('keyEvidence:', result.world.solution.keyEvidenceId);
-  console.log('requiredEvidence:', result.world.solution.requiredEvidenceIds);
-
-  console.log('\n--- WHAT REALLY HAPPENED ---');
-  console.log(result.world.whatReallyHappened);
 
   console.log('\n--- VALIDATION ---');
   const v = validateWorld(result.world, 5);
@@ -106,10 +99,10 @@ async function main() {
   console.log('setting:', result3.world.meta.setting);
   console.log('entryScenes:', result3.world.entryScenes.length);
 
-  console.log('\n✅ All tests completed.');
+  console.log('\nAll tests completed.');
 }
 
 main().catch((err) => {
-  console.error('❌ Test failed:', err);
+  console.error('Test failed:', err);
   process.exit(1);
 });
