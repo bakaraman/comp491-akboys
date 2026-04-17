@@ -19,7 +19,7 @@ function client(): OpenAI {
   if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return _client;
 }
-const MODEL = 'gpt-5.4';
+const MODEL = 'gpt-5.4-mini';
 const MAX_TOKENS = 6000;
 const TEMPERATURE = 0.9;
 
@@ -230,6 +230,8 @@ async function callOpenAIOnce(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<WorldData> {
+  const t0 = Date.now();
+  console.log(`${DEBUG} OpenAI call ▶ model=${MODEL} promptLen=${systemPrompt.length + userPrompt.length}`);
   const completion = await client().beta.chat.completions.parse({
     model: MODEL,
     messages: [
@@ -240,6 +242,7 @@ async function callOpenAIOnce(
     max_completion_tokens: MAX_TOKENS,
     temperature: TEMPERATURE,
   });
+  console.log(`${DEBUG} OpenAI call ✓ (${Date.now() - t0}ms)`);
 
   const msg = completion.choices[0].message;
   if (msg.refusal) {
@@ -252,7 +255,9 @@ async function callOpenAIOnce(
   if (!msg.parsed) {
     throw new Error('No parsed content');
   }
-  return normalizeWorld(msg.parsed as WorldData);
+  const world = normalizeWorld(msg.parsed as WorldData);
+  console.log(`${DEBUG}   parsed: title="${world.meta.title}" rooms=${world.rooms.length} npcs=${world.npcs.length} items=${world.items.length} entryScenes=${world.entryScenes.length}`);
+  return world;
 }
 
 /**

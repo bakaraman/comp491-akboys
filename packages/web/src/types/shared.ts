@@ -225,7 +225,7 @@ export interface ServerToClientEvents {
     evidenceItems: Array<{ id: string; name: string }>;
   }) => void;
   'story:image-ready': (data: {
-    kind: 'room' | 'npc';
+    kind: 'opening' | 'room' | 'npc';
     id: string;
     url: string;
   }) => void;

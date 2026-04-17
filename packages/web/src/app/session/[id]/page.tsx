@@ -17,11 +17,9 @@ import { ChatInput } from '@/components/ChatInput';
 import { PlayerSidebar } from '@/components/PlayerSidebar';
 import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { CommPanel } from '@/components/CommPanel';
-import { EvidenceBoard } from '@/components/EvidenceBoard';
-import type { EvidenceItem, SuspectInfo } from '@/components/EvidenceBoard';
 import { LobbyScreen } from '@/components/LobbyScreen';
+import { OpeningCinematic } from '@/components/OpeningCinematic';
 import { FinaleCinematic } from '@/components/FinaleCinematic';
-import { useAmbientMusic } from '@/hooks/useAmbientMusic';
 import { T } from '@/lib/tr';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
@@ -110,16 +108,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
 
-  // Ambient noir music — louder during opening/finale, quieter mid-game
-  const ambientActive =
-    isMultiplayer &&
-    (mp.gameState === 'lobby' ||
-      mp.gameState === 'voting' ||
-      mp.gameState === 'playing' ||
-      mp.gameState === 'ended');
-  const ambientBoost =
-    mp.gameState === 'ended' || mp.worldMeta !== null && mp.gameState !== 'playing';
-  useAmbientMusic(ambientActive, ambientBoost ? 0.18 : 0.05);
+  /* Music lives only inside OpeningCinematic + FinaleCinematic overlays */
 
   /* Auto-refresh session info when MP game transitions to playing state
      (scenario is confirmed, title/meta becomes available) */
@@ -133,9 +122,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     prevGameStateRef.current = mp.gameState;
   }, [mp.gameState, isMultiplayer, refreshSessionInfo]);
 
-  /* ---- UI overlays (used by MP evidence/map) ---- */
-  const [isJournalOpen, setIsJournalOpen] = useState(false);
+  /* ---- UI overlays ---- */
   const [isMapOpen, setIsMapOpen] = useState(false);
+  const [isAccuseOpen, setIsAccuseOpen] = useState(false);
+  const [openingDismissed, setOpeningDismissed] = useState(false);
 
   /* ---- Multiplayer lobby/voting state ---- */
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -366,11 +356,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
           >Map</button>
           <button
-            onClick={() => setIsJournalOpen(true)}
-            style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a3a2a', borderRadius: '6px', color: '#8aaa70', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#8aaa70'; e.currentTarget.style.color = '#b0d090'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3a2a'; e.currentTarget.style.color = '#8aaa70'; }}
-          >Journal</button>
+            onClick={() => setIsAccuseOpen(true)}
+            style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #7a3232', borderRadius: '6px', color: '#d46868', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d46868'; e.currentTarget.style.color = '#e88080'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#7a3232'; e.currentTarget.style.color = '#d46868'; }}
+          >{T.game.accuse}</button>
           <button onClick={handleLeave} style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#cf5b5b'; e.currentTarget.style.color = '#cf5b5b'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
@@ -438,45 +428,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onOpened={mp.clearUnreadComm}
       />
 
-      {/* Evidence Board (MP) */}
-      {(() => {
-        const meta = sessionInfo?.scenarioMeta;
-        const roomMap = Object.fromEntries((meta?.rooms || []).map((r) => [r.id, r.name]));
-        const allEvidence: EvidenceItem[] = (meta?.items || [])
-          .filter((i) => i.isEvidence)
-          .map((i) => ({ ...i, roomName: roomMap[i.roomId] || i.roomId }));
-        const mpVisitedRooms = myPlayer?.visitedRooms || [];
-        const suspects: SuspectInfo[] = (meta?.npcs || [])
-          .filter((npc) => mpVisitedRooms.includes(npc.roomId || ''))
-          .map((npc) => ({
-            id: npc.id,
-            name: npc.name,
-            description: npc.description || '',
-            roomId: npc.roomId || '',
-            roomName: npc.roomId ? (roomMap[npc.roomId] || npc.roomId) : '',
-            visited: true,
-          }));
-        const myInventory = myPlayer?.inventory || [];
-        const discoveredIds = myInventory.filter((id) =>
-          allEvidence.some((e) => e.id === id),
-        );
-        return (
-          <EvidenceBoard
-            mode="multiplayer"
-            isOpen={isJournalOpen}
-            onClose={() => setIsJournalOpen(false)}
-            allEvidence={allEvidence}
-            discoveredIds={discoveredIds}
-            suspects={suspects}
-            sharedEvidence={mp.sharedEvidence}
-            onShareEvidence={mp.shareEvidence}
-            onProposeAccusation={(suspectId) => {
-              setIsJournalOpen(false);
-              void mp.proposeAccusation(suspectId);
-            }}
-          />
-        );
-      })()}
+      {/* Accuse modal — simple suspect picker */}
+      {isAccuseOpen && (
+        <AccuseModal
+          suspects={(sessionInfo?.scenarioMeta?.npcs || []).filter(
+            (n) => (myPlayer?.visitedRooms || []).includes(n.roomId || ''),
+          )}
+          onCancel={() => setIsAccuseOpen(false)}
+          onAccuse={(suspectId) => {
+            setIsAccuseOpen(false);
+            void mp.proposeAccusation(suspectId);
+          }}
+        />
+      )}
 
       {/* Game Map (MP) */}
       {(() => {
@@ -557,6 +521,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           vote={mp.activeVote}
           isProposer={mp.activeVote.proposerId === mp.myPlayerId}
           onVote={mp.voteAccusation}
+        />
+      )}
+
+      {/* Opening Cinematic — shown once per playing session */}
+      {mp.gameState === 'playing' && mp.worldMeta && !openingDismissed && !mp.gameOver && (
+        <OpeningCinematic
+          title={mp.worldMeta.title}
+          setting={mp.worldMeta.setting}
+          openingNarration={mp.worldMeta.openingNarration}
+          openingImageUrl={mp.worldMeta.openingImageUrl}
+          onStart={() => setOpeningDismissed(true)}
         />
       )}
 
@@ -666,6 +641,112 @@ function AccusationVoteBanner({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  AccuseModal — simple suspect picker (replaces EvidenceBoard)        */
+/* ================================================================== */
+
+interface AccuseSuspect {
+  id: string;
+  name: string;
+  description?: string;
+  roomId?: string;
+}
+
+function AccuseModal({
+  suspects,
+  onCancel,
+  onAccuse,
+}: {
+  suspects: AccuseSuspect[];
+  onCancel: () => void;
+  onAccuse: (suspectId: string) => void;
+}) {
+  const [selected, setSelected] = useState<string>('');
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.78)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 75,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: '460px', backgroundColor: '#111',
+        border: '1px solid #2a2520', borderRadius: '14px', padding: '28px',
+        margin: '0 16px',
+      }}>
+        <h2 style={{ color: '#d46868', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0, marginBottom: '6px' }}>
+          {T.accuse.title}
+        </h2>
+        <p style={{ color: '#9a9080', fontSize: '13px', lineHeight: '1.6', marginBottom: '20px' }}>
+          {T.accuse.unanimousRequired}
+        </p>
+
+        {suspects.length === 0 ? (
+          <p style={{ color: '#6a6050', fontSize: '13px', fontStyle: 'italic', fontFamily: 'Georgia, serif', marginBottom: '20px' }}>
+            Henüz kimseyle karşılaşmadın.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+            {suspects.map((npc) => {
+              const isSelected = selected === npc.id;
+              return (
+                <button
+                  key={npc.id}
+                  onClick={() => setSelected(npc.id)}
+                  style={{
+                    padding: '14px 16px',
+                    backgroundColor: isSelected ? '#1a1510' : '#0d0d0d',
+                    border: `2px solid ${isSelected ? '#d4a843' : '#1e1e1e'}`,
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{
+                    fontSize: '14px', fontFamily: 'Georgia, serif',
+                    color: isSelected ? '#d4a843' : '#b0a080',
+                  }}>
+                    {npc.name}
+                  </div>
+                  {npc.description && (
+                    <div style={{ fontSize: '11px', color: '#5a5545', fontFamily: 'monospace', marginTop: '4px' }}>
+                      {npc.description}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <button
+            onClick={onCancel}
+            style={{ padding: '10px 20px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#6a6050', fontFamily: 'monospace', cursor: 'pointer' }}
+          >
+            {T.accuse.cancel}
+          </button>
+          <button
+            onClick={() => selected && onAccuse(selected)}
+            disabled={!selected}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: selected ? '#7a2020' : '#1a1815',
+              border: `1px solid ${selected ? '#d46868' : '#2a2520'}`,
+              borderRadius: '8px',
+              color: selected ? '#e8e0d4' : '#3a3530',
+              fontFamily: 'monospace', fontWeight: 'bold',
+              cursor: selected ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {T.accuse.propose}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

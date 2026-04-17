@@ -178,7 +178,7 @@ CURRENT ACTION BY: ${actingPlayerName} (in room "${actingPlayerRoom}")
 ${roleRules}
 You will respond with a JSON object containing three fields:
 
-"response": A detailed, immersive second-person narrative directed at ${actingPlayerName}. Use "you" to address them. Describe what they see, find, or experience. 1-3 paragraphs. Use markdown: **bold** for names/places, *italic* for sounds/feelings, > blockquotes for NPC speech, ## headings for new rooms.
+"response": A detailed, immersive second-person narrative directed at ${actingPlayerName}. **WRITE IN TURKISH.** Literary, flowing, Chandler + Pamuk tone. Address them as "sen". Describe what they see, find, or experience. 1-3 paragraphs. Use markdown: **bold** for names/places, *italic* for sounds/feelings, > blockquotes for NPC speech, ## headings for new rooms.
 
 "observed": ONE brief third-person sentence describing what nearby characters would physically observe ${actingPlayerName} doing. Do NOT reveal discoveries or secrets — only the observable physical action. Example: "${actingPlayerName} kneels beside the body and examines it closely."
 
@@ -209,6 +209,7 @@ CRITICAL DIRECTIVE RULES:
 - When a player examines, picks up, takes, or collects an item, you MUST include a PICKUP directive: {"type":"PICKUP","player":"${actingPlayerName}","target":"item_id"}
 - Items marked [EVIDENCE] are especially important — always use PICKUP when the player finds or takes evidence.
 - When a player moves to a new room, you MUST include a MOVE directive: {"type":"MOVE","player":"${actingPlayerName}","target":"room_id"}
+- **YOU HAVE FULL AUTHORITY OVER MOVEMENT.** The "Exits:" hints in the ROOMS list are suggestions, not hard rules. You can narratively allow a player to go to ANY room in the ROOMS list if the story justifies it (they find a new corridor, climb out a window, follow an NPC, etc.). You can also refuse movement if the narrative demands it (locked door, danger, etc.) even if an exit is listed.
 - When a player opens, unlocks, or breaks something, include the appropriate directive (OPEN, UNLOCK, BREAK).
 - Use exact item IDs and room IDs from the lists above, not display names.
 - If the player's action involves finding or examining an item and they would logically take it, include PICKUP.
@@ -328,16 +329,9 @@ export function parseStructuredResponse(
       detail: d.detail,
     }));
 
-  let privateResponse = (json.response || '').trim();
-  let observedLine = (json.observed || '').trim();
-
-  // Fallbacks
-  if (!privateResponse || privateResponse.length < 5) {
-    privateResponse = '*The narrator hesitates, lost in thought...*';
-  }
-  if (!observedLine || observedLine.length < 5) {
-    observedLine = generateFallbackObserved(actorName, actionText);
-  }
+  const privateResponse = (json.response || '').trim() || '*Anlatıcı bir an duraksıyor...*';
+  const observedLine = (json.observed || '').trim();
+  void actorName; void actionText;
 
   return { privateResponse, observedLine, directives };
 }
@@ -382,9 +376,6 @@ export function parseLegacyTextResponse(raw: string, actorName: string, actionTe
       .trim();
   }
 
-  if (!observedLine || observedLine.length < 5) {
-    observedLine = generateFallbackObserved(actorName, actionText);
-  }
   if (!privateResponse || privateResponse.length < 5) {
     privateResponse = '*The narrator hesitates, lost in thought...*';
   }
@@ -392,32 +383,10 @@ export function parseLegacyTextResponse(raw: string, actorName: string, actionTe
   return { privateResponse, observedLine, directives };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Fallback observed line generator                                   */
-/* ------------------------------------------------------------------ */
-
-function generateFallbackObserved(actorName: string, actionText: string): string {
-  const action = actionText.toLowerCase();
-  if (action.includes('look') || action.includes('examine') || action.includes('inspect') || action.includes('search')) {
-    return `${actorName} carefully inspects something nearby.`;
-  }
-  if (action.includes('move') || action.includes('go') || action.includes('walk') || action.includes('enter')) {
-    return `${actorName} moves to a different part of the area.`;
-  }
-  if (action.includes('take') || action.includes('pick') || action.includes('grab')) {
-    return `${actorName} reaches for something.`;
-  }
-  if (action.includes('talk') || action.includes('ask') || action.includes('speak')) {
-    return `${actorName} starts a conversation with someone.`;
-  }
-  if (action.includes('open') || action.includes('unlock')) {
-    return `${actorName} tries to open something.`;
-  }
-  if (action.includes('use')) {
-    return `${actorName} uses an item.`;
-  }
-  return `${actorName} does something in the room.`;
-}
+// generateFallbackObserved removed: no more keyword-based fallback. If the
+// AI didn't emit an "observed" line, we leave it blank (and observed is no
+// longer broadcast in Velvet Shadow v2 anyway — witnesses see the full
+// narrator response instead).
 
 /* ------------------------------------------------------------------ */
 /*  Directive validation against canonical server state                */
@@ -451,24 +420,9 @@ export function validateDirective(
       if (!targetRoom) {
         return { valid: false, reason: `Room "${directive.target}" does not exist` };
       }
-      // Validate exit exists from current room (normal or discovered hidden)
-      const currentRoom = scenario.rooms.find((r) => r.id === player.currentRoomId);
-      const normalExits = currentRoom ? Object.values(currentRoom.exits) : [];
-
-      // Also check discovered hidden exits (#40)
-      const discoveredHiddenExits: string[] = [];
-      if (currentRoom?.hiddenExits) {
-        for (const [dir, hidden] of Object.entries(currentRoom.hiddenExits)) {
-          const key = `${currentRoom.id}:hidden_exit:${dir}`;
-          if (session.objectStates.get(key)?.discovered) {
-            discoveredHiddenExits.push(hidden.targetRoomId);
-          }
-        }
-      }
-
-      if (currentRoom && !normalExits.includes(directive.target) && !discoveredHiddenExits.includes(directive.target)) {
-        return { valid: false, reason: `No exit from "${player.currentRoomId}" to "${directive.target}"` };
-      }
+      // Narrator has full authority over movement — no exit graph enforcement.
+      // The exits field is a hint only; the AI decides narratively whether a
+      // move is possible based on the story.
       return {
         valid: true,
         worldLogEntry: `${directive.playerName} moved from ${player.currentRoomId} to ${directive.target}`,

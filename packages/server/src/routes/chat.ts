@@ -16,7 +16,6 @@ import {
   generateSceneImage,
   narratorChatStream,
   suggestFollowUps,
-  extractGameStateUpdate,
 } from '../middleware/openai.js';
 import { requireAuth } from '../middleware/auth.js';
 import { SCENARIOS } from '@akboys/shared';
@@ -153,20 +152,7 @@ async function streamResponse(
     historyLengthAfter: store.get(sessionId)?.history.length,
   });
 
-  try {
-    const stateUpdates = await extractGameStateUpdate(
-      fullText,
-      playerAction,
-      store.get(sessionId)!.gameState,
-      scenario,
-    );
-
-    if (Object.keys(stateUpdates).length > 0) {
-      store.updateGameState(sessionId, stateUpdates);
-    }
-  } catch (err) {
-    console.warn('[streamResponse] game state extraction error:', err);
-  }
+  // (SP-only regex-heuristic state extraction removed — MP uses AI directives only)
 
   res.write(
     `data: ${JSON.stringify({
@@ -634,7 +620,9 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         fullText += chunk;
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
       }
-      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, whatReallyHappened: session.world.whatReallyHappened, players: playerNames })}\n\n`);
+      const culpritName = session.world.npcs.find((n) => n.id === session.world!.solution.culpritNpcId)?.name || null;
+      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, culpritName, whatReallyHappened: session.world.whatReallyHappened, players: playerNames })}\n\n`);
+      console.log(`[finale ${sessionId.slice(0, 8)}] ✓ stream done (${fullText.length} chars, culprit=${culpritName})`);
       res.end();
     } catch (err) {
       console.error(`${DEBUG_PREFIX} finale stream error`, err);

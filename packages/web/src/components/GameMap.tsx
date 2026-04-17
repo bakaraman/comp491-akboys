@@ -12,7 +12,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { MAP_LAYOUTS, type ScenarioMapLayout } from '@/lib/map-layouts';
+import { MAP_LAYOUTS, type ScenarioMapLayout, type RoomPosition } from '@/lib/map-layouts';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -63,6 +63,104 @@ function resolveTheme(scenarioId: string): ThemeKey {
     return scenarioId as ThemeKey;
   }
   return 'noir';
+}
+
+/**
+ * Build a grid layout from rooms[] via BFS from the first room.
+ * Used when scenarioId has no hand-crafted MAP_LAYOUTS entry (procedural worlds).
+ */
+function computeAutoLayout(rooms: MapRoom[]): ScenarioMapLayout | undefined {
+  if (rooms.length === 0) return undefined;
+
+  const CELL_W = 160;
+  const CELL_H = 120;
+  const PAD = 60;
+  const positions = new Map<string, { x: number; y: number }>();
+  const startId = rooms[0].id;
+  const queue: string[] = [startId];
+  positions.set(startId, { x: 0, y: 0 });
+
+  const dirOffsets: Record<string, { dx: number; dy: number }> = {
+    north: { dx: 0, dy: -1 },
+    south: { dx: 0, dy: 1 },
+    east:  { dx: 1, dy: 0 },
+    west:  { dx: -1, dy: 0 },
+    up:    { dx: 0, dy: -1 },
+    down:  { dx: 0, dy: 1 },
+  };
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    const room = rooms.find((r) => r.id === cur);
+    if (!room) continue;
+    const pos = positions.get(cur)!;
+    for (const [dir, target] of Object.entries(room.exits)) {
+      if (!target || positions.has(target)) continue;
+      const off = dirOffsets[dir] ?? { dx: 1, dy: 0 };
+      let tx = pos.x + off.dx;
+      let ty = pos.y + off.dy;
+      let tries = 0;
+      while (
+        Array.from(positions.values()).some((p) => p.x === tx && p.y === ty) &&
+        tries < 8
+      ) {
+        tx += 1;
+        tries++;
+      }
+      positions.set(target, { x: tx, y: ty });
+      queue.push(target);
+    }
+  }
+
+  // Orphan rooms (not reached via BFS): drop them below
+  let fallbackRow = 0;
+  let fallbackCol = 0;
+  const W = 4;
+  for (const r of rooms) {
+    if (!positions.has(r.id)) {
+      let maxY = 0;
+      for (const p of positions.values()) if (p.y > maxY) maxY = p.y;
+      positions.set(r.id, { x: fallbackCol, y: maxY + 2 });
+      fallbackCol = (fallbackCol + 1) % W;
+      if (fallbackCol === 0) fallbackRow++;
+    }
+  }
+  void fallbackRow;
+
+  // Normalize and convert to viewBox pixels
+  const xs = Array.from(positions.values()).map((p) => p.x);
+  const ys = Array.from(positions.values()).map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+
+  const width = (maxX - minX + 1) * CELL_W + PAD * 2;
+  const height = (maxY - minY + 1) * CELL_H + PAD * 2;
+
+  const outRooms: Record<string, RoomPosition> = {};
+  for (const r of rooms) {
+    const p = positions.get(r.id)!;
+    outRooms[r.id] = {
+      x: PAD + (p.x - minX) * CELL_W + CELL_W / 2,
+      y: PAD + (p.y - minY) * CELL_H + CELL_H / 2,
+    };
+  }
+
+  return {
+    viewBox: { width, height },
+    rooms: outRooms,
+    theme: {
+      bg: '#0d0a08',
+      roomFill: '#1a140a',
+      roomStroke: '#8a6a30',
+      roomText: '#e8d8a8',
+      connection: '#5a4530',
+      current: '#d4a843',
+      fogFill: '#0f0d0a',
+      fogStroke: '#2a2015',
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -245,7 +343,8 @@ export function GameMap({
     setTraveling(null);
   }, [currentRoomId]);
 
-  const layout: ScenarioMapLayout | undefined = MAP_LAYOUTS[scenarioId];
+  const autoLayout = useMemo(() => computeAutoLayout(rooms), [rooms]);
+  const layout: ScenarioMapLayout | undefined = MAP_LAYOUTS[scenarioId] || autoLayout;
   const themeKey = resolveTheme(scenarioId);
   const theme = THEMES[themeKey];
 

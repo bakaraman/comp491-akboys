@@ -552,69 +552,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // Fallback evidence detection: scan narrative for item names (like SP does)
       // This catches cases where the AI describes finding an item but omits the PICKUP directive
       const actingPlayer = store.getPlayer(sessionId, action.playerId);
-      if (actingPlayer) {
-        // Combined team knowledge for prerequisite checks (#26)
-        const teamKnowledge = new Set<string>();
-        for (const p of session.players.values()) {
-          for (const invId of p.inventory) teamKnowledge.add(invId);
-        }
-        for (const eid of session.gameState.discoveredEvidence) teamKnowledge.add(eid);
-
-        const lowerResponse = privateResponse.toLowerCase();
-        const lowerAction = action.message.toLowerCase();
-        const evidenceItems = scenario.items.filter((i) => i.isEvidence);
-        // Only trigger fallback if the player's action actually suggests interacting with the item
-        const lookVerbs = /\b(take|pick|grab|collect|find|examine|investigate|search|look|inspect|check|open|read)\b/;
-        const playerIntendsPickup = lookVerbs.test(lowerAction);
-        for (const item of evidenceItems) {
-          if (actingPlayer.inventory.includes(item.id)) continue;
-          // #26: skip locked items whose prerequisites aren't satisfied
-          if (item.prerequisites && item.prerequisites.length > 0) {
-            const prereqsMet = item.prerequisites.every((p) => teamKnowledge.has(p));
-            if (!prereqsMet) continue;
-          }
-          // Only trigger on player intent (avoid auto-pickup on casual mentions)
-          if (!playerIntendsPickup) continue;
-          const itemName = item.name.toLowerCase();
-          const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
-          if (lowerResponse.includes(itemName) || lowerResponse.includes(itemIdWords)) {
-            const currentInv = store.getPlayer(sessionId, action.playerId)?.inventory || [];
-            if (!currentInv.includes(item.id)) {
-              store.updatePlayer(sessionId, action.playerId, {
-                inventory: [...currentInv, item.id],
-              });
-              session.worldStateLog.push(`Turn ${session.gameState.turnCount}: ${item.id} discovered by ${action.playerName} in ${action.roomId}`);
-              console.log(`[evidence-fallback] ${action.playerName} discovered ${item.id} via narrative mention`);
-            }
-          }
-        }
-
-        // Also detect room movement from narrative if no MOVE directive was issued
-        if (!directives.some((d) => d.type === 'MOVE')) {
-          const isMovement = /\b(go|walk|move|head|enter|leave|travel|climb)\b/.test(lowerAction);
-          if (isMovement) {
-            const freshPlayer = store.getPlayer(sessionId, action.playerId);
-            if (freshPlayer) {
-              const currentRoom = scenario.rooms.find((r) => r.id === freshPlayer.currentRoomId);
-              const dirMatch = lowerAction.match(/\b(north|south|east|west|up|down)\b/);
-              if (currentRoom && dirMatch) {
-                const nextRoomId = currentRoom.exits[dirMatch[1]];
-                if (nextRoomId) {
-                  const newVisited = freshPlayer.visitedRooms.includes(nextRoomId)
-                    ? freshPlayer.visitedRooms
-                    : [...freshPlayer.visitedRooms, nextRoomId];
-                  store.updatePlayer(sessionId, action.playerId, {
-                    currentRoomId: nextRoomId,
-                    visitedRooms: newVisited,
-                  });
-                  session.worldStateLog.push(`Turn ${session.gameState.turnCount}: ${action.playerName} moved to ${nextRoomId}`);
-                  console.log(`[move-fallback] ${action.playerName} moved to ${nextRoomId} via action text`);
-                }
-              }
-            }
-          }
-        }
-      }
+      // Note: AI narrator is the sole authority for movement and item pickups.
+      // No regex-based fallback heuristics — if the narrator missed a directive,
+      // it missed it. Trust the AI to emit MOVE/PICKUP/DISCOVER correctly.
+      void actingPlayer;
 
       // Velvet Shadow v2: same-room players share the FULL narrator response
       // (observed summaries removed — every player in this room sees what the
@@ -1102,23 +1043,28 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       store.setHostPrompt(sessionId, hostPrompt);
       io.to(sessionId).emit('story:status', { phase: 'queued' });
 
+      const sid = sessionId.slice(0, 8);
+      const tStoryStart = Date.now();
+      console.log(`[story ${sid}] ▶ start prompt="${hostPrompt.slice(0, 60)}" playerCount=${session.players.size}`);
+
       try {
         io.to(sessionId).emit('story:status', { phase: 'generating', message: 'Hikaye yazılıyor...' });
         const playerCount = session.players.size;
+
+        const tWorldStart = Date.now();
         const result = await generateWorld({ hostPrompt, playerCount });
+        const worldMs = Date.now() - tWorldStart;
         store.setWorld(sessionId, result.world);
-        console.log(`[story:generate] world ready for ${sessionId.slice(0, 8)} (fallback=${result.usedFallback})`);
+        console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${result.world.meta.title}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback}`);
+        console.log(`[story ${sid}]   openingNarration: ${result.world.openingNarration.slice(0, 240)}...`);
+        console.log(`[story ${sid}]   culprit: ${result.world.npcs.find((n) => n.isCulprit)?.name}`);
 
         // Also set scenarioId to our synthetic marker so downstream code knows.
         const sess = store.get(sessionId);
         if (sess) sess.scenarioId = '__generated';
         void store.sync(sessionId);
 
-        io.to(sessionId).emit('story:status', { phase: 'image', message: 'Açılış görseli oluşturuluyor...' });
-        const openingUrl = await generateOpeningImage(result.world);
-        store.setOpeningImage(sessionId, openingUrl);
-
-        // Assign players to entry scenes
+        // Assign players to entry scenes BEFORE emitting story:ready
         const freshSession = store.get(sessionId);
         if (freshSession) {
           const entries = result.world.entryScenes;
@@ -1132,7 +1078,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           });
         }
 
-        // Broadcast "story ready" with all the world metadata
+        // Prepare broadcast payload
         const rooms = result.world.rooms.map((r) => ({
           id: r.id,
           name: r.name,
@@ -1147,8 +1093,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           .filter((i) => i.isEvidence)
           .map((i) => ({ id: i.id, name: i.name }));
 
+        // Emit story:ready WITHOUT waiting for opening image.
+        // The opening image will arrive later via story:image-ready { kind: 'opening' }.
         io.to(sessionId).emit('story:ready', {
-          openingImageUrl: openingUrl,
+          openingImageUrl: null,
           world: {
             title: result.world.meta.title,
             setting: result.world.meta.setting,
@@ -1161,8 +1109,26 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           npcs,
           evidenceItems,
         });
-
         store.markOpeningReady(sessionId);
+        console.log(`[story ${sid}] ✓ emit story:ready (total=${Date.now() - tStoryStart}ms) — image pending`);
+
+        // Kick off opening image ASYNC — no blocking
+        io.to(sessionId).emit('story:status', { phase: 'image', message: 'Açılış görseli oluşturuluyor...' });
+        const tImgStart = Date.now();
+        void generateOpeningImage(result.world).then((openingUrl) => {
+          const imgMs = Date.now() - tImgStart;
+          if (openingUrl) {
+            store.setOpeningImage(sessionId, openingUrl);
+            io.to(sessionId).emit('story:image-ready', {
+              kind: 'opening',
+              id: 'opening',
+              url: openingUrl,
+            });
+            console.log(`[story ${sid}] ✓ opening image ready (${imgMs}ms, ${(openingUrl.length / 1024).toFixed(0)}KB)`);
+          } else {
+            console.warn(`[story ${sid}] ✗ opening image failed (${imgMs}ms)`);
+          }
+        });
 
         // Kick off async room + NPC image generation (non-blocking)
         void generateAllRoomImages(result.world, (res) => {
@@ -1173,6 +1139,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
               id: res.roomId,
               url: res.url,
             });
+            console.log(`[story ${sid}]   room image ready: ${res.roomId}`);
           }
         });
         void generateAllNpcPortraits(result.world, (res) => {
@@ -1183,10 +1150,11 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
               id: res.npcId,
               url: res.url,
             });
+            console.log(`[story ${sid}]   npc portrait ready: ${res.npcId}`);
           }
         });
       } catch (err) {
-        console.error(`[story:generate] failed:`, err);
+        console.error(`[story ${sid}] ✗ failed:`, err);
         io.to(sessionId).emit('story:status', {
           phase: 'failed',
           message: (err as Error).message || 'Hikaye oluşturulamadı',

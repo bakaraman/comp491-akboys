@@ -332,9 +332,9 @@ export interface ServerToClientEvents {
     evidenceItems: Array<{ id: string; name: string }>;
   }) => void;
 
-  /** An async-loaded image finished (room or NPC portrait) */
+  /** An async-loaded image finished (opening, room, or NPC portrait) */
   'story:image-ready': (data: {
-    kind: 'room' | 'npc';
+    kind: 'opening' | 'room' | 'npc';
     id: string;
     url: string;
   }) => void;

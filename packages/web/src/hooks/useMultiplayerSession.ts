@@ -360,6 +360,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     socket.on('story:ready', (data) => {
+      console.log(`[session] story:ready title="${data.world.title}" rooms=${data.rooms.length} npcs=${data.npcs.length} image=${data.openingImageUrl ? 'yes' : 'pending'}`);
       setWorldMeta({
         title: data.world.title,
         setting: data.world.setting,
@@ -375,7 +376,10 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     socket.on('story:image-ready', (data) => {
-      if (data.kind === 'room') {
+      console.log(`[session] story:image-ready kind=${data.kind} id=${data.id}`);
+      if (data.kind === 'opening') {
+        setWorldMeta((prev) => (prev ? { ...prev, openingImageUrl: data.url } : prev));
+      } else if (data.kind === 'room') {
         setRoomImages((prev) => ({ ...prev, [data.id]: data.url }));
       } else if (data.kind === 'npc') {
         setNpcPortraits((prev) => ({ ...prev, [data.id]: data.url }));

@@ -56,12 +56,11 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
 
   const system = `You are narrating the FINALE of a noir mystery. Write in flowing, literary Turkish. Channel Chandler + Pamuk.
 
-Write 4-6 short paragraphs. This will be read aloud by TTS — write for the ear. Natural rhythm. No awkward phrasing. Short sentences where dramatic, longer where reflective.
+Write EXACTLY 2 short paragraphs. Maximum 180 Turkish words total. This will be read aloud by TTS — write for the ear. Natural rhythm. Short sentences where dramatic.
 
-Reference SPECIFIC things the team found or missed. Be concrete, not generic.
-Include the real truth from the scenario. Let the mood match the outcome.
+Reference SPECIFIC things the team found or missed. Be concrete, not generic. Name the real culprit. Let the mood match the outcome.
 
-Do NOT use list items, headers, or markdown. Prose only.`;
+Do NOT use list items, headers, or markdown. Prose only. Separate the two paragraphs with a single blank line.`;
 
   const truthBlock = `WORLD:
 Title: ${world.meta.title}
@@ -114,16 +113,18 @@ export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<
   const { system, user } = buildFinalePrompt(input);
   console.log(`${DEBUG} streaming finale: outcome=${input.outcome}`);
 
+  const t0 = Date.now();
   const stream = await client().chat.completions.create({
-    model: 'gpt-5.4',
+    model: 'gpt-5.4-mini',
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    max_completion_tokens: 1200,
+    max_completion_tokens: 500,
     temperature: 0.85,
     stream: true,
   });
+  console.log(`${DEBUG} stream opened (${Date.now() - t0}ms)`);
 
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;

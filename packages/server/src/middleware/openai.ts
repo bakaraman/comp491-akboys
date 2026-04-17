@@ -9,7 +9,7 @@
  */
 
 import OpenAI from 'openai';
-import type { ChatMessage, GameState, Scenario } from '@akboys/shared';
+import type { ChatMessage } from '@akboys/shared';
 
 /**
  * Model configuration — change these to switch models.
@@ -17,7 +17,7 @@ import type { ChatMessage, GameState, Scenario } from '@akboys/shared';
  * gpt-4o       : previous gen, still solid
  * gpt-4o-mini  : fast, cheap, good for dev/testing
  */
-const MODEL = 'gpt-5.4';
+const MODEL = 'gpt-5.4-mini';
 const MAX_TOKENS = 800;
 const TEMPERATURE = 0.85;
 
@@ -53,6 +53,8 @@ export async function* narratorChatStream(
   systemPrompt: string,
   history: ChatMessage[],
 ): AsyncGenerator<string> {
+  const t0 = Date.now();
+  console.log(`[narrator-stream] ▶ model=${MODEL} historyLen=${history.length} promptLen=${systemPrompt.length}`);
   const stream = await getClient().chat.completions.create({
     model: MODEL,
     messages: buildMessages(systemPrompt, history),
@@ -61,12 +63,20 @@ export async function* narratorChatStream(
     stream: true,
   });
 
+  let firstChunkAt = -1;
+  let totalChars = 0;
+  let fullText = '';
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;
     if (delta) {
+      if (firstChunkAt < 0) firstChunkAt = Date.now() - t0;
+      totalChars += delta.length;
+      fullText += delta;
       yield delta;
     }
   }
+  console.log(`[narrator-stream] ✓ (first=${firstChunkAt}ms total=${Date.now() - t0}ms chars=${totalChars})`);
+  console.log(`[narrator-stream]   preview: ${fullText.slice(0, 200).replace(/\n/g, ' ')}...`);
 }
 
 /**
@@ -85,6 +95,8 @@ export async function narratorStructuredResponse(
   systemPrompt: string,
   history: ChatMessage[],
 ): Promise<StructuredNarratorResponse | null> {
+  const t0 = Date.now();
+  console.log(`[narrator-structured] ▶ model=${MODEL} historyLen=${history.length}`);
   try {
     const completion = await getClient().chat.completions.create({
       model: MODEL,
@@ -131,6 +143,7 @@ export async function narratorStructuredResponse(
     });
 
     const raw = completion.choices[0]?.message?.content;
+    console.log(`[narrator-structured] ✓ (${Date.now() - t0}ms, ${raw?.length ?? 0} chars)`);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -141,12 +154,14 @@ export async function narratorStructuredResponse(
       typeof parsed.observed === 'string' &&
       Array.isArray(parsed.directives)
     ) {
+      console.log(`[narrator-structured]   response: ${parsed.response.slice(0, 200).replace(/\n/g, ' ')}...`);
+      console.log(`[narrator-structured]   directives: ${parsed.directives.length} (${parsed.directives.map((d: { type: string }) => d.type).join(', ')})`);
       return parsed as StructuredNarratorResponse;
     }
 
     return null;
   } catch (err) {
-    console.error('[openai] structured response error:', err);
+    console.error(`[narrator-structured] ✗ error after ${Date.now() - t0}ms:`, err);
     return null;
   }
 }
@@ -202,199 +217,8 @@ export async function suggestFollowUps(lastNarratorText: string): Promise<string
   return ['Look around', 'Talk to someone', 'Examine the room'];
 }
 
-/**
- * Infer coarse game-state updates from the player's action and the narrator's response.
- * This is primarily used for the single-player SSE flow; multiplayer already maintains
- * richer canonical state in the socket pipeline.
- */
-export async function extractGameStateUpdate(
-  narrative: string,
-  playerAction: string,
-  currentState: Pick<
-    GameState,
-    'currentRoomId' | 'inventory' | 'visitedRooms' | 'isGameOver' | 'discoveredEvidence'
-  >,
-  scenario: Scenario,
-): Promise<Partial<Omit<GameState, 'conversationHistory'>>> {
-  const roomIds = scenario.rooms.map((room) => room.id);
-  const itemIds = scenario.items.map((item) => item.id);
-  const evidenceItems = scenario.items.filter((item) => item.isEvidence);
-  const actionLower = playerAction.toLowerCase();
-  const isMovementAction = /\b(go|walk|move|head|enter|leave|travel|climb)\b/.test(actionLower);
-
-  const systemPrompt = `You are a deterministic game-state tracker for a text adventure.
-Valid room IDs: ${roomIds.join(', ')}
-Valid item IDs: ${itemIds.join(', ')}
-Current room: ${currentState.currentRoomId}
-Current inventory: ${JSON.stringify(currentState.inventory)}
-
-Return ONLY a JSON object with any changed fields from:
-{
-  "currentRoomId": string,
-  "inventory": string[],
-  "isGameOver": boolean
-}
-
-Rules:
-- Change currentRoomId only if the player clearly moves to a new room.
-- Only include inventory when an item is clearly taken, picked up, or dropped.
-- Leave fields out if unchanged.
-- Return {} if nothing changed.`;
-
-  let partial: Partial<Omit<GameState, 'conversationHistory'>> = {};
-
-  try {
-    const completion = await getClient().chat.completions.create({
-      model: FAST_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: `Player action: "${playerAction}"\n\nNarrator response:\n"${narrative.slice(-900)}"`,
-        },
-      ],
-      max_completion_tokens: 120,
-      reasoning_effort: 'minimal' as 'low',
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim() || '{}';
-    const parsed = JSON.parse(raw);
-
-    if (typeof parsed.currentRoomId === 'string' && roomIds.includes(parsed.currentRoomId)) {
-      // Validate: movement must be to an adjacent room (prevents LLM hallucination
-      // where it suggests a room that isn't directly reachable from current position).
-      const currentRoom = scenario.rooms.find((r) => r.id === currentState.currentRoomId);
-      const adjacentIds = currentRoom ? Object.values(currentRoom.exits) : [];
-      const isSameRoom = parsed.currentRoomId === currentState.currentRoomId;
-      const isAdjacent = adjacentIds.includes(parsed.currentRoomId);
-      if (isSameRoom || isAdjacent) {
-        partial.currentRoomId = parsed.currentRoomId;
-      }
-      // If LLM returned a non-adjacent room, silently ignore and let fallback handle it
-    }
-
-    if (
-      Array.isArray(parsed.inventory) &&
-      parsed.inventory.every((value: unknown) => typeof value === 'string')
-    ) {
-      partial.inventory = parsed.inventory;
-    }
-
-    if (typeof parsed.isGameOver === 'boolean') {
-      partial.isGameOver = parsed.isGameOver;
-    }
-  } catch (err) {
-    console.warn('[extractGameStateUpdate] fallback to heuristic parsing:', err);
-  }
-
-  const lowerNarrative = narrative.toLowerCase();
-
-  // #27 FIX: Evidence discovery now requires explicit examine/investigate action
-  // AND both the player action and narrator response must reference the item.
-  // In multiplayer, evidence discovery is handled by DISCOVER directives from the narrator.
-  const isExamineAction = /\b(examine|inspect|investigate|search|discover|find|pick.?up|look.?at|study|analyze)\b/i.test(actionLower);
-  if (isExamineAction) {
-    const discoveredEvidence = new Set(currentState.discoveredEvidence);
-    for (const item of evidenceItems) {
-      const itemName = item.name.toLowerCase();
-      const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
-      // Both action AND narrative must reference the item to count as discovered
-      const mentionedInAction = actionLower.includes(itemName) || actionLower.includes(itemIdWords);
-      const mentionedInNarrative = lowerNarrative.includes(itemName) || lowerNarrative.includes(itemIdWords);
-      if (mentionedInAction && mentionedInNarrative) {
-        discoveredEvidence.add(item.id);
-      }
-    }
-    if (discoveredEvidence.size !== currentState.discoveredEvidence.length) {
-      partial.discoveredEvidence = [...discoveredEvidence];
-    }
-  }
-
-  if (!partial.currentRoomId && isMovementAction) {
-    const currentRoom = scenario.rooms.find((room) => room.id === currentState.currentRoomId);
-    const directionMatch = actionLower.match(/\b(north|south|east|west|up|down|n|s|e|w)\b/);
-    if (currentRoom && directionMatch) {
-      const dirMap: Record<string, string> = {
-        n: 'north',
-        s: 'south',
-        e: 'east',
-        w: 'west',
-      };
-      const normalizedDirection = dirMap[directionMatch[1]] || directionMatch[1];
-      const nextRoomId = currentRoom.exits[normalizedDirection];
-      if (nextRoomId) {
-        partial.currentRoomId = nextRoomId;
-      }
-    }
-  }
-
-  if (!partial.currentRoomId && isMovementAction) {
-    const currentRoom = scenario.rooms.find((r) => r.id === currentState.currentRoomId);
-    const adjacentIds = currentRoom ? Object.values(currentRoom.exits) : [];
-
-    // Priority 1: player explicitly named an ADJACENT room in the action text
-    // (This is the user's direct intent — honor it first)
-    for (const room of scenario.rooms) {
-      if (room.id === currentState.currentRoomId) continue;
-      if (!adjacentIds.includes(room.id)) continue;
-      const roomName = room.name.toLowerCase();
-      if (actionLower.includes(roomName)) {
-        partial.currentRoomId = room.id;
-        break;
-      }
-    }
-
-    // Priority 2: narrative clearly describes arrival in an adjacent room
-    if (!partial.currentRoomId) {
-      for (const room of scenario.rooms) {
-        if (room.id === currentState.currentRoomId) continue;
-        if (!adjacentIds.includes(room.id)) continue;
-        const roomName = room.name.toLowerCase();
-        if (lowerNarrative.includes(roomName)) {
-          partial.currentRoomId = room.id;
-          break;
-        }
-      }
-    }
-
-    // Priority 3: any room name in action (rare edge case — non-adjacent intent)
-    if (!partial.currentRoomId) {
-      for (const room of scenario.rooms) {
-        if (room.id === currentState.currentRoomId) continue;
-        const roomName = room.name.toLowerCase();
-        if (actionLower.includes(roomName)) {
-          partial.currentRoomId = room.id;
-          break;
-        }
-      }
-    }
-  }
-
-  if (!partial.inventory && /\b(pick|take|grab|get|collect)\b/.test(actionLower)) {
-    const updatedInventory = new Set(currentState.inventory);
-    for (const item of scenario.items) {
-      const itemName = item.name.toLowerCase();
-      const itemIdWords = item.id.replace(/_/g, ' ').toLowerCase();
-      if (
-        actionLower.includes(itemName) ||
-        actionLower.includes(itemIdWords) ||
-        lowerNarrative.includes(itemName)
-      ) {
-        updatedInventory.add(item.id);
-      }
-    }
-
-    if (updatedInventory.size !== currentState.inventory.length) {
-      partial.inventory = [...updatedInventory];
-    }
-  }
-
-  if (partial.currentRoomId && !currentState.visitedRooms.includes(partial.currentRoomId)) {
-    partial.visitedRooms = [...currentState.visitedRooms, partial.currentRoomId];
-  }
-
-  return partial;
-}
+// extractGameStateUpdate removed: was a bag of regex heuristics for single-player.
+// MP flow uses AI-emitted directives (MOVE/PICKUP/DISCOVER) as the sole source of truth.
 
 /**
  * Generate a scene image URL for the current room.

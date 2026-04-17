@@ -64,7 +64,9 @@ export const T = {
   opening: {
     skip: 'Geç',
     continue: 'Devam Et',
+    start: 'Hikayeye Başla',
     loading: 'Sahne hazırlanıyor…',
+    imageLoading: 'Görsel hazırlanıyor…',
   },
 
   game: {
