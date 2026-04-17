@@ -11,32 +11,27 @@
 export const T = {
   app: {
     title: 'The Velvet Shadow',
-    subtitle: 'Yapay Zeka ile Bir Noir Dedektif Oyunu',
-    tagline: 'İki ile on dedektif. Her oyunda yeni bir gizem. Tek bir doğru suçlama.',
+    subtitle: 'Çok oyunculu AI hikâye oyunu',
+    tagline: '2–10 oyuncu, her seferinde yeni bir hikâye',
   },
 
   home: {
-    startSession: 'Yeni Bir Seans Başlat',
-    startHint: '2 ile 10 dedektif, gerçek zamanlı bir noir filmi',
+    createTitle: 'Yeni Oda Aç',
+    createHint: 'Hikâyeyi sen başlat, arkadaşlarına kodu gönder',
+    createButton: 'Oda Oluştur',
+    creating: 'Oluşturuluyor…',
+    joinTitle: 'Bir Odaya Katıl',
+    joinHint: '6 haneli oda kodunu gir',
+    joinPlaceholder: 'ABC123',
+    joinButton: 'Katıl',
+    joining: 'Katılıyor…',
     signOut: 'Çıkış Yap',
-    courseNote: 'COMP 491 — AKBOYS — Bahar 2026',
+    courseNote: 'COMP 491 · AKBOYS · Bahar 2026',
   },
 
   multiplayer: {
-    pageTitle: 'Çok Oyunculu',
-    back: '← Geri',
-    hostCard: 'Oda Aç',
-    hostDesc: 'Yeni bir oyun başlat, arkadaşlarına kodu ver',
-    joinCard: 'Odaya Katıl',
-    joinDesc: 'Arkadaşının verdiği kodu gir',
-    roomCodePlaceholder: 'Oda Kodu',
-    join: 'Katıl',
-    create: 'Oda Oluştur',
-    creating: 'Oluşturuluyor…',
-    hostBlurb: 'Yeni bir seans oluştur. Oda kodunu arkadaşlarınla paylaş — en fazla on dedektif katılabilir.',
-    joinBlurb: 'Arkadaşının sana verdiği altı harfli oda kodunu yaz.',
-    invalidCode: 'Lütfen geçerli bir oda kodu yaz',
     noRoom: 'Bu kod ile bir oda bulunamadı',
+    invalidCode: 'Lütfen geçerli bir 6 haneli kod yaz',
   },
 
   lobby: {

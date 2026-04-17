@@ -329,7 +329,7 @@ chatRouter.post('/suggestions', requireAuth, async (req: Request, res: Response)
     const lastAssistant = session?.history.filter((m) => m.role === 'assistant').pop();
 
     if (!lastAssistant) {
-      res.json({ suggestions: ['Look around', 'Talk to someone', 'Check the room'] });
+      res.json({ suggestions: ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'] });
       return;
     }
 
@@ -337,7 +337,7 @@ chatRouter.post('/suggestions', requireAuth, async (req: Request, res: Response)
     res.json({ suggestions });
   } catch (err) {
     console.error('[suggestions] error:', err);
-    res.json({ suggestions: ['Look around', 'Talk to someone', 'Check the room'] });
+    res.json({ suggestions: ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'] });
   }
 });
 
@@ -559,12 +559,12 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
     }
     const ttsRes = await streamTts({
       text,
-      voice: (voice as 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined) ?? 'shimmer',
-      format: 'wav',
+      voice: (voice as 'ash' | 'ballad' | 'fable' | 'verse' | 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined) ?? 'ash',
+      format: 'mp3',
     });
 
     const buf = Buffer.from(await ttsRes.arrayBuffer());
-    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Content-Length', String(buf.length));
     res.end(buf);

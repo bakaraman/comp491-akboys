@@ -240,6 +240,18 @@ export interface ServerToClientEvents {
     queueSize: number;
   }) => void;
 
+  /** Broadcast to all players in the session whenever the action queue changes. */
+  'session:queue': (data: {
+    waiting: Array<{
+      playerId: string;
+      playerName: string;
+      playerColor: string;
+      message: string;
+    }>;
+    processingPlayerId: string | null;
+    processingPlayerName: string | null;
+  }) => void;
+
   'session:state': (data: { session: SessionStateDTO }) => void;
 
   'session:error': (data: { message: string }) => void;

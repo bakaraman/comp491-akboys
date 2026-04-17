@@ -54,11 +54,16 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
   const wrongNpc = wrongAccusedNpcId ? world.npcs.find((n) => n.id === wrongAccusedNpcId) : null;
   const evidenceItem = evidencePresentedId ? world.items.find((i) => i.id === evidencePresentedId) : null;
 
-  const system = `You are narrating the FINALE of a noir mystery. Write in flowing, literary Turkish. Channel Chandler + Pamuk.
+  const system = `You are narrating the FINALE of a mystery. Write in clear, direct, natural Turkish.
 
-Write EXACTLY 2 short paragraphs. Maximum 180 Turkish words total. This will be read aloud by TTS — write for the ear. Natural rhythm. Short sentences where dramatic.
+Write EXACTLY 2 short paragraphs. Maximum 150 Turkish words total. Every sentence delivers a fact or beat — no filler, no decoration, no "edebi" heavy style.
 
-Reference SPECIFIC things the team found or missed. Be concrete, not generic. Name the real culprit. Let the mood match the outcome.
+Plain readable prose. Short sentences. Think the matter-of-fact voice of a detective recounting what happened, NOT Orhan Pamuk. Every line should either:
+  - Name a specific thing the team found or missed
+  - State who did what and why
+  - Land a concrete consequence
+
+Read it aloud in your head — if a sentence sounds ornamental, cut it.
 
 Do NOT use list items, headers, or markdown. Prose only. Separate the two paragraphs with a single blank line.`;
 
@@ -113,13 +118,13 @@ export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<
 
   const t0 = Date.now();
   const stream = await client().chat.completions.create({
-    model: 'gpt-5.4-mini',
+    model: 'gpt-5.4',
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    max_completion_tokens: 500,
-    temperature: 0.85,
+    max_completion_tokens: 1500, // leave room for reasoning tokens
+    reasoning_effort: 'medium',
     stream: true,
   });
   console.log(`${DEBUG} stream opened (${Date.now() - t0}ms)`);

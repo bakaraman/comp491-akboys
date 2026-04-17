@@ -11,8 +11,8 @@ import type { Metadata } from 'next';
 import '@/styles/globals.css';
 
 export const metadata: Metadata = {
-  title: 'The Velvet Shadow — Text Adventure',
-  description: 'AI-powered noir detective text adventure game',
+  title: 'The Velvet Shadow',
+  description: 'Çok oyunculu AI hikâye oyunu',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

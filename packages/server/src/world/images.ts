@@ -15,7 +15,7 @@ import type { WorldData } from '@akboys/shared';
 
 const DEBUG = '[world-images]';
 
-/** Safely generate one image. Returns null on any failure (silent). */
+/** Safely generate one image. Single attempt, silent on failure. */
 export async function safeGenerateImage(prompt: string, label: string): Promise<string | null> {
   try {
     const url = await generateSceneImage(prompt);
@@ -33,6 +33,22 @@ export async function generateOpeningImage(world: WorldData): Promise<string | n
   const start = Date.now();
   const url = await safeGenerateImage(prompt, 'opening');
   console.log(`${DEBUG} opening: ${url ? 'ok' : 'failed'} (${Date.now() - start}ms)`);
+  return url;
+}
+
+/**
+ * Generate an opening image from just the host prompt, before world gen finishes.
+ * We don't have visualStylePrompt yet, so we bolt on a generic noir style hint.
+ * Runs in parallel with world text generation.
+ */
+export async function generateOpeningImageFromPrompt(hostPrompt: string): Promise<string | null> {
+  const styled =
+    `${hostPrompt.trim()}. Atmospheric establishing shot, wide angle, no people, ` +
+    `cinematic noir lighting, rich shadows, moody color grading, film still, high detail.`;
+  console.log(`${DEBUG} opening-early: generating from host prompt`);
+  const start = Date.now();
+  const url = await safeGenerateImage(styled, 'opening-early');
+  console.log(`${DEBUG} opening-early: ${url ? 'ok' : 'failed'} (${Date.now() - start}ms)`);
   return url;
 }
 

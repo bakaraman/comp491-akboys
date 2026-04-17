@@ -147,8 +147,12 @@ export const WorldSchema = z.object({
       + 'Each entry has a personalized narrative hook.',
   ),
   openingNarration: z.string().describe(
-    'Turkish 3-4 sentences. Shown as full-screen text on the opening cinematic, '
-      + 'read aloud by TTS. Write for the ear — natural rhythm, literary.',
+    'Turkish 4-6 sentences — this is the ONLY text shown on the opening cinematic '
+      + 'and read aloud by TTS. WEAVE IN the era, location, and atmospheric details '
+      + '(what was in meta.setting) naturally — no separate setting line is displayed, '
+      + 'so everything the player should hear about where and when they are must live here. '
+      + 'Clear, direct, natural Turkish prose. Short sentences. No literary flourishes, '
+      + 'no ornamental metaphors — normal anlatıcı tonu, ne daha fazlası ne daha azı.',
   ),
   solution: SolutionSchema,
 });

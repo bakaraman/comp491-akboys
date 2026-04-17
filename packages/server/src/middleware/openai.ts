@@ -17,9 +17,11 @@ import type { ChatMessage } from '@akboys/shared';
  * gpt-4o       : previous gen, still solid
  * gpt-4o-mini  : fast, cheap, good for dev/testing
  */
-const MODEL = 'gpt-5.4-mini';
-const MAX_TOKENS = 800;
-const TEMPERATURE = 0.85;
+const MODEL = 'gpt-5.4';
+const REASONING_EFFORT: 'low' | 'medium' | 'high' = 'medium';
+// gpt-5.4 reasoning tokens count against max_completion_tokens, so bump
+// the ceiling so the visible output isn't starved by reasoning work.
+const MAX_TOKENS = 2500;
 
 let _client: OpenAI | null = null;
 
@@ -59,7 +61,7 @@ export async function* narratorChatStream(
     model: MODEL,
     messages: buildMessages(systemPrompt, history),
     max_completion_tokens: MAX_TOKENS,
-    temperature: TEMPERATURE,
+    reasoning_effort: REASONING_EFFORT,
     stream: true,
   });
 
@@ -102,7 +104,7 @@ export async function narratorStructuredResponse(
       model: MODEL,
       messages: buildMessages(systemPrompt, history),
       max_completion_tokens: MAX_TOKENS,
-      temperature: TEMPERATURE,
+      reasoning_effort: REASONING_EFFORT,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -177,7 +179,7 @@ export async function narratorChat(
     model: MODEL,
     messages: buildMessages(systemPrompt, history),
     max_completion_tokens: MAX_TOKENS,
-    temperature: TEMPERATURE,
+    reasoning_effort: REASONING_EFFORT,
   });
 
   return completion.choices[0]?.message?.content || 'The narrator is silent...';
@@ -196,11 +198,11 @@ export async function suggestFollowUps(lastNarratorText: string): Promise<string
     messages: [
       {
         role: 'system',
-        content: `Give 3 short things a player can do next in a detective game. Max 5 words each. Use simple English. Return ONLY a JSON array of 3 strings. Example: ["Look around","Talk to the man","Open the door"]`,
+        content: `Bir dedektif oyununda oyuncunun yapabileceği 3 KISA, SOMUT eylem öner. Her biri en fazla 5 kelime. HEPSİ TÜRKÇE. Yalnızca 3 string içeren bir JSON dizisi döndür. Örnek: ["Etrafına bak","Barmenle konuş","Kapıyı aç"]`,
       },
       {
         role: 'user',
-        content: `The narrator just said:\n"${lastNarratorText.slice(-500)}"\n\nSuggest 3 actions:`,
+        content: `Anlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-500)}"\n\n3 Türkçe eylem öner:`,
       },
     ],
     max_completion_tokens: 150,
@@ -214,7 +216,7 @@ export async function suggestFollowUps(lastNarratorText: string): Promise<string
       return parsed.slice(0, 3);
     }
   } catch { /* fallback below */ }
-  return ['Look around', 'Talk to someone', 'Examine the room'];
+  return ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'];
 }
 
 // extractGameStateUpdate removed: was a bag of regex heuristics for single-player.

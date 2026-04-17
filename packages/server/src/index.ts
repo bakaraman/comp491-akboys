@@ -74,6 +74,10 @@ const io = new Server(server, {
     origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
   },
+  // Generous ping window so background-throttled tabs and HMR reloads
+  // don't get spuriously kicked out every 45s.
+  pingInterval: 25000,
+  pingTimeout: 60000,
 });
 
 registerSocketHandlers(io, store);

@@ -107,12 +107,21 @@ Respond with a JSON object:
 }
 
 RESPONSE RULES:
-- WRITE IN TURKISH. Literary, flowing, Chandler + Pamuk. Address the player as "sen".
-- 1-3 paragraphs. Sensory detail: rain, light, smells, small gestures. No meta-commentary.
-- Use markdown: **bold** for names/places, *italic* for sounds/feelings, > blockquote for NPC dialogue, ## headings for new rooms.
-- If an NPC talks, voice them in character. Match their personality. Liars lie; the culprit MUST NOT confess.
-- Do NOT list items mechanically. If the player picks something up, narrate it ("eline aldın, cebine koydun").
-- If action is impossible or the NPC refuses, narrate the failure in-story.
+- WRITE IN TURKISH. Clear, direct, natural prose. **Normal bir anlatıcı gibi anlat.** Address the player as "sen".
+- 1-2 short paragraphs, maximum 4-5 sentences. No literary flourishes, no poetic metaphors, no "edebi" heavy style.
+- Every sentence should move the story forward with a concrete fact, observation, or action. If it's filler, cut it.
+- Short sentences. Plain, readable Turkish. Think factual detective narration, not Orhan Pamuk.
+- Use markdown lightly: **bold** for names/places, > blockquote for NPC dialogue, ## headings only when entering a NEW room.
+- When an NPC speaks, put their exact words in a blockquote. Liars lie; the culprit MUST NOT confess.
+- If the player picks something up or moves, state it plainly ("eldivenini cebine koydun", "bara doğru yürüyorsun").
+- If action is impossible or an NPC refuses, say so directly without decoration.
+
+NPC NAMING RULE (important):
+- Always write an NPC's role before their name so the player immediately knows who they are. Examples:
+  * "**başhemşire Feride Aksu**" (not just "Feride Aksu")
+  * "**barmen Mickey Malone**" (not just "Mickey")
+  * "**doktor Şevket Arman**" (not just "Şevket Arman")
+- Use the role exactly as given in the NPCs list above. Apply this on every mention, not just the first.
 
 MOVEMENT RULES:
 - YOU have full authority over movement. The "Exits hint" is just a suggestion.
@@ -137,7 +146,7 @@ Setting: ${scenario.setting}
 Players:
 ${playerList}
 
-Write a short atmospheric opening paragraph in Turkish. 3-4 sentences, literary, for the ear.`;
+Write a short atmospheric opening paragraph in Turkish. 3-4 short sentences. Clear, natural prose — no literary flourishes.`;
 }
 
 /* ------------------------------------------------------------------ */

@@ -22,24 +22,24 @@ const DEBUG = '[opening-cinematic]';
 
 export interface OpeningCinematicProps {
   title: string;
-  setting: string;
   openingNarration: string;
   openingImageUrl: string | null;
+  /** Optional pre-fetched TTS audio URL (blob URL). If provided, cinematic plays immediately. */
+  ttsAudioUrl: string | null;
   onStart: () => void;
 }
 
 export function OpeningCinematic({
   title,
-  setting,
   openingNarration,
   openingImageUrl,
+  ttsAudioUrl,
   onStart,
 }: OpeningCinematicProps) {
   const [visibleChars, setVisibleChars] = useState(0);
   const [ttsReady, setTtsReady] = useState(false);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const ttsRef = useRef<HTMLAudioElement | null>(null);
-  const ttsStarted = useRef(false);
   const dismissed = useRef(false);
 
   const fullText = openingNarration || '';
@@ -65,7 +65,7 @@ export function OpeningCinematic({
     });
 
     const start = Date.now();
-    const target = 0.22;
+    const target = 0.10;
     const duration = 1800;
     const iv = setInterval(() => {
       const pct = Math.min(1, (Date.now() - start) / duration);
@@ -89,75 +89,102 @@ export function OpeningCinematic({
     };
   }, []);
 
-  // Fetch TTS audio (but don't play yet)
+  // Play pre-fetched TTS (or fetch on-the-fly as a fallback)
   useEffect(() => {
-    if (ttsStarted.current) return;
     if (!fullText || fullText.length < 20) {
       console.log(`${DEBUG} TTS: narration too short, skipping`);
       setTtsReady(true);
       return;
     }
-    ttsStarted.current = true;
-    const fetchStart = Date.now();
 
-    (async () => {
-      try {
-        console.log(`${DEBUG} TTS: fetch start (${fullText.length} chars)`);
-        const res = await fetch(`${API_BASE}/api/chat/tts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-          body: JSON.stringify({ text: fullText, voice: 'shimmer' }),
-        });
-        if (!res.ok) {
-          console.error(`${DEBUG} TTS: HTTP ${res.status}`);
-          setTtsReady(true);
+    function attachAudio(url: string) {
+      console.log(`${DEBUG} TTS: attaching audio url=${url.slice(0, 60)}...`);
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.volume = 0.92;
+      audio.src = url;
+      ttsRef.current = audio;
+
+      audio.onloadedmetadata = () => {
+        console.log(`${DEBUG} TTS: metadata loaded (duration=${audio.duration.toFixed(2)}s, readyState=${audio.readyState})`);
+      };
+
+      audio.oncanplay = () => {
+        console.log(`${DEBUG} TTS: canplay fired (readyState=${audio.readyState})`);
+      };
+
+      audio.onstalled = () => console.warn(`${DEBUG} TTS: stalled`);
+      audio.onsuspend = () => console.log(`${DEBUG} TTS: suspend`);
+
+      audio.ontimeupdate = () => {
+        if (!audio.duration || !isFinite(audio.duration)) return;
+        const ratio = audio.currentTime / audio.duration;
+        const chars = Math.ceil(ratio * fullText.length);
+        setVisibleChars(chars);
+      };
+
+      audio.onended = () => {
+        console.log(`${DEBUG} TTS: ended → auto-dismiss in 1.5s`);
+        setVisibleChars(fullText.length);
+        setTimeout(() => dismiss(), 1500);
+      };
+
+      audio.onerror = () => {
+        const mediaError = audio.error;
+        const codeLabel = mediaError
+          ? ['', 'ABORTED', 'NETWORK', 'DECODE', 'SRC_NOT_SUPPORTED'][mediaError.code] || `code=${mediaError.code}`
+          : 'unknown';
+        console.error(`${DEBUG} TTS: playback error (${codeLabel}) message="${mediaError?.message ?? ''}" srcMime=${audio.currentSrc ? 'blob' : 'none'} → auto-dismiss`);
+        setVisibleChars(fullText.length);
+        setTimeout(() => dismiss(), 1500);
+      };
+
+      setTtsReady(true);
+      // Explicit load() to force the element to start fetching the blob URL
+      audio.load();
+      void audio.play().catch((err) => {
+        // AbortError is fired when another effect pauses the audio (e.g. React
+        // Strict Mode dev re-mount). The re-mount will attach a fresh audio
+        // element; don't fall back to the silent reveal path here.
+        if (err?.name === 'AbortError') {
+          console.warn(`${DEBUG} TTS: play() aborted (ignored — Strict Mode re-mount)`);
           return;
         }
-        const blob = await res.blob();
-        console.log(`${DEBUG} TTS: fetched (${Date.now() - fetchStart}ms, ${blob.size} bytes)`);
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.volume = 0.92;
-        ttsRef.current = audio;
-
-        audio.onloadedmetadata = () => {
-          console.log(`${DEBUG} TTS: metadata loaded (duration=${audio.duration.toFixed(2)}s)`);
-        };
-
-        audio.ontimeupdate = () => {
-          if (!audio.duration || !isFinite(audio.duration)) return;
-          const ratio = audio.currentTime / audio.duration;
-          const chars = Math.ceil(ratio * fullText.length);
-          setVisibleChars(chars);
-        };
-
-        audio.onended = () => {
-          console.log(`${DEBUG} TTS: ended → auto-dismiss in 1.5s`);
-          setVisibleChars(fullText.length);
-          setTimeout(() => dismiss(), 1500);
-        };
-
-        audio.onerror = () => {
-          console.error(`${DEBUG} TTS: playback error → auto-dismiss`);
-          setVisibleChars(fullText.length);
-          setTimeout(() => dismiss(), 1500);
-        };
-
-        setTtsReady(true);
-        void audio.play().catch((err) => {
-          console.warn(`${DEBUG} TTS: play() blocked`, err);
-          // Autoplay blocked — start revealing text on a timer and dismiss
-          revealWithoutAudio();
-        });
-      } catch (err) {
-        console.error(`${DEBUG} TTS: fetch failed`, err);
-        setTtsReady(true);
+        console.warn(`${DEBUG} TTS: play() blocked`, err?.name, err?.message);
         revealWithoutAudio();
-      }
-    })();
+      });
+    }
+
+    if (ttsAudioUrl) {
+      console.log(`${DEBUG} TTS: using pre-fetched audio url`);
+      attachAudio(ttsAudioUrl);
+    } else {
+      // Fallback — fetch ourselves (slower path)
+      console.warn(`${DEBUG} TTS: no pre-fetched url, fetching now (this should be rare)`);
+      const fetchStart = Date.now();
+      (async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/chat/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+            body: JSON.stringify({ text: fullText, voice: 'ash' }),
+          });
+          if (!res.ok) {
+            console.error(`${DEBUG} TTS: HTTP ${res.status}`);
+            revealWithoutAudio();
+            return;
+          }
+          const blob = await res.blob();
+          console.log(`${DEBUG} TTS: fetched (${Date.now() - fetchStart}ms, ${blob.size} bytes)`);
+          attachAudio(URL.createObjectURL(blob));
+        } catch (err) {
+          console.error(`${DEBUG} TTS: fetch failed`, err);
+          revealWithoutAudio();
+        }
+      })();
+    }
 
     function revealWithoutAudio() {
-      // ~15 chars per second reading speed fallback
       const start = Date.now();
       const charsPerSec = 15;
       const iv = setInterval(() => {
@@ -173,12 +200,23 @@ export function OpeningCinematic({
 
     return () => {
       if (ttsRef.current) {
-        ttsRef.current.pause();
-        ttsRef.current.src = '';
+        // Detach ALL event handlers first so orphaned audio doesn't fire
+        // onerror / onended / etc. on its way out (happens in React Strict Mode
+        // dev re-mounts where this cleanup runs right after attachAudio).
+        const a = ttsRef.current;
+        a.onerror = null;
+        a.onended = null;
+        a.ontimeupdate = null;
+        a.onloadedmetadata = null;
+        a.oncanplay = null;
+        a.onstalled = null;
+        a.onsuspend = null;
+        try { a.pause(); } catch { /* */ }
+        // Do NOT assign src = '' — it triggers MEDIA_ERR_SRC_NOT_SUPPORTED.
         ttsRef.current = null;
       }
     };
-  }, [fullText]);
+  }, [fullText, ttsAudioUrl]);
 
   const shown = fullText.slice(0, visibleChars);
 
@@ -211,34 +249,15 @@ export function OpeningCinematic({
           }}
         />
       ) : (
+        // No image available — render a deep-noir gradient instead of a spinner.
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#3a3530',
-            fontFamily: 'monospace',
-            fontSize: '11px',
-            letterSpacing: '2px',
+            background:
+              'radial-gradient(ellipse at 50% 30%, #1a1410 0%, #0a0806 60%, #050403 100%)',
           }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div
-              style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                border: '2px solid #2a2520',
-                borderTopColor: '#d4a843',
-                animation: 'spin 1.2s linear infinite',
-                margin: '0 auto 10px',
-              }}
-            />
-            <div>{T.opening.imageLoading.toUpperCase()}</div>
-          </div>
-        </div>
+        />
       )}
 
       {/* Vignette */}
@@ -272,18 +291,6 @@ export function OpeningCinematic({
             opacity: 0,
           }}
         >
-          <p
-            style={{
-              color: '#8a7d60',
-              fontFamily: 'monospace',
-              fontSize: '11px',
-              letterSpacing: '4px',
-              textTransform: 'uppercase',
-              marginBottom: '14px',
-            }}
-          >
-            {setting}
-          </p>
           <h1
             style={{
               color: '#e8d4a4',

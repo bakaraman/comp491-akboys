@@ -88,6 +88,11 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioVotes, setScenarioVotes] = useState<Record<string, string[]>>({});
   const [unreadComm, setUnreadComm] = useState(0);
+  const [actionQueue, setActionQueue] = useState<{
+    waiting: Array<{ playerId: string; playerName: string; playerColor: string; message: string }>;
+    processingPlayerId: string | null;
+    processingPlayerName: string | null;
+  }>({ waiting: [], processingPlayerId: null, processingPlayerName: null });
   const [activeVote, setActiveVote] = useState<{
     proposerId: string;
     proposerName: string;
@@ -220,9 +225,28 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       });
     });
 
-    /* -- Narrator events (scoped) -- */
+    /* -- Queue state (broadcast to everyone) -- */
+    socket.on('session:queue', (data) => {
+      console.log(
+        `[session] queue update: processing=${data.processingPlayerName ?? 'none'} waiting=${data.waiting.length}`,
+      );
+      setActionQueue({
+        waiting: data.waiting,
+        processingPlayerId: data.processingPlayerId,
+        processingPlayerName: data.processingPlayerName,
+      });
+    });
+
+    /* -- Narrator events (scoped server-side) --
+     * The server already fans narrator events out only to: the actor + all
+     * connected players in the same room. So if we receive the event at all,
+     * we're part of the intended audience — just render it, don't re-filter.
+     * Only skip streaming-state updates when the chunk is for a DIFFERENT
+     * acting player (so the banner doesn't flicker showing "yazıyor" to
+     * witnesses before they'd logically see it). The final message still
+     * appears via narrator:done.
+     */
     socket.on('narrator:chunk', ({ fullText, targetPlayerId }) => {
-      // Only show streaming if it's for me or for everyone (no target = opening)
       const me = myPlayerIdRef.current;
       if (!targetPlayerId || targetPlayerId === me) {
         setIsNarratorStreaming(true);
@@ -232,17 +256,20 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
 
     socket.on('narrator:done', ({ fullText, suggestions: sugg, targetPlayerId }) => {
       const me = myPlayerIdRef.current;
-      if (!targetPlayerId || targetPlayerId === me) {
+      const isForMe = !targetPlayerId || targetPlayerId === me;
+      if (isForMe) {
         setIsNarratorStreaming(false);
         setStreamingText('');
         setBatchInfo(null);
         setSuggestions(sugg);
-        addMessage({
-          role: 'assistant',
-          content: fullText,
-          timestamp: Date.now(),
-        });
       }
+      // ALWAYS add the message to chat if we received it — server decides
+      // the audience (actor + same-room witnesses).
+      addMessage({
+        role: 'assistant',
+        content: fullText,
+        timestamp: Date.now(),
+      });
     });
 
     /* -- Observed narration (same-room witness) -- */
@@ -543,6 +570,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     typingPlayers,
     isNarratorStreaming,
     batchInfo,
+    actionQueue,
     isConnected,
     error,
     myPlayerId,

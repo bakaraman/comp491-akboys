@@ -41,9 +41,7 @@ import { narratorChatStream, narratorStructuredResponse, suggestFollowUps } from
 import {
   getScenarioForSession,
   generateWorld,
-  generateOpeningImage,
-  generateAllRoomImages,
-  generateAllNpcPortraits,
+  generateOpeningImageFromPrompt,
 } from '../world/index.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -51,6 +49,14 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
 /** Maps a socket ID to the session and player it belongs to */
 const socketMap = new Map<string, { sessionId: string; playerId: string }>();
+
+/**
+ * Pending disconnect timers keyed by playerId. If the player reconnects within
+ * DISCONNECT_GRACE_MS, we cancel the timer and the chat never sees a
+ * "X disconnected" / "X reconnected" flicker.
+ */
+const pendingDisconnects = new Map<string, NodeJS.Timeout>();
+const DISCONNECT_GRACE_MS = 15_000;
 
 /** Active accusation vote timers — stored separately so they survive serialization */
 const accusationTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -248,6 +254,30 @@ function performNPCMovement(session: SessionData, scenario: Scenario): void {
 
 export function registerSocketHandlers(io: GameServer, store: SessionStore): void {
 
+  /* ---- Queue-state broadcaster ---- */
+  function emitQueueState(
+    sessionId: string,
+    processing: PlayerAction | null,
+    remainingInBatch: PlayerAction[] = [],
+  ): void {
+    const session = store.get(sessionId);
+    if (!session) return;
+    const waiting = [...remainingInBatch, ...session.actionQueue].map((a) => {
+      const p = session.players.get(a.playerId);
+      return {
+        playerId: a.playerId,
+        playerName: a.playerName,
+        playerColor: p?.color ?? '#888',
+        message: a.message,
+      };
+    });
+    io.to(sessionId).emit('session:queue', {
+      waiting,
+      processingPlayerId: processing?.playerId ?? null,
+      processingPlayerName: processing?.playerName ?? null,
+    });
+  }
+
   /* ---- Action batcher: fires per-player narrator calls ---- */
   const batcher = new ActionBatcher(store, async (sessionId, actions) => {
     const session = store.get(sessionId);
@@ -259,7 +289,11 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     session.isStreaming = true;
 
     // Process each action sequentially for canonical state consistency
-    for (const action of actions) {
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      // Broadcast: this player is now being processed; anyone after is still waiting.
+      emitQueueState(sessionId, action, actions.slice(i + 1));
+
       const player = store.getPlayer(sessionId, action.playerId);
       if (!player) continue;
 
@@ -468,6 +502,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     // Always broadcast final player state after all actions resolve
     const finalPlayers = Array.from(session.players.values()).map(toPlayerDTO);
     io.to(sessionId).emit('players:updated', { players: finalPlayers });
+
+    // Batch complete — any remaining actions in session.actionQueue are
+    // from late-arrivers and will be processed in the next batch.
+    emitQueueState(sessionId, null, []);
   });
 
   io.on('connection', (socket: GameSocket) => {
@@ -581,15 +619,26 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       const timeRemaining = batcher.enqueue(sessionId, action);
 
-      // Only notify the acting player that their action was queued
-      socket.emit('action:queued', {
-        playerId,
-        playerName: player.name,
-        playerColor: player.color,
-        message: action.message,
-        queueSize: batcher.queueSize(sessionId),
-        timeRemaining,
-      });
+      // Actor + same-room witness sockets get action:queued so everyone who
+      // shares the room sees the typed action in real time (shared-session UX).
+      const actingSocketIds = findSocketsForPlayer(playerId);
+      const witnessSocketIds = findSocketsInRoom(store, sessionId, player.currentRoomId, playerId);
+      const fanout = new Set<string>([...actingSocketIds, ...witnessSocketIds]);
+      for (const sid of fanout) {
+        io.to(sid).emit('action:queued', {
+          playerId,
+          playerName: player.name,
+          playerColor: player.color,
+          message: action.message,
+          queueSize: batcher.queueSize(sessionId),
+          timeRemaining,
+        });
+      }
+
+      // Broadcast queue state to EVERYONE in the session so teammates can
+      // see who's waiting and in what order. (processing state, if any, will
+      // be re-emitted by the batcher loop's next iteration.)
+      emitQueueState(sessionId, null, []);
 
       console.log(`[socket] ${player.name} queued action in session ${sessionId.slice(0, 8)}`);
     });
@@ -874,6 +923,24 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const tStoryStart = Date.now();
       console.log(`[story ${sid}] ▶ start prompt="${hostPrompt.slice(0, 60)}" playerCount=${session.players.size}`);
 
+      // Kick off opening image in PARALLEL with world gen — uses just the host
+      // prompt + a generic noir style hint so we don't have to wait for world text.
+      const tImgEarlyStart = Date.now();
+      const openingImagePromise = generateOpeningImageFromPrompt(hostPrompt).then((url) => {
+        const ms = Date.now() - tImgEarlyStart;
+        if (url) {
+          store.setOpeningImage(sessionId, url);
+          io.to(sessionId).emit('story:image-ready', {
+            kind: 'opening',
+            id: 'opening',
+            url,
+          });
+          console.log(`[story ${sid}] ✓ opening image ready (${ms}ms, ${(url.length / 1024).toFixed(0)}KB) [parallel]`);
+        } else {
+          console.warn(`[story ${sid}] ✗ opening image failed (${ms}ms)`);
+        }
+      });
+
       try {
         io.to(sessionId).emit('story:status', { phase: 'generating', message: 'Hikaye yazılıyor...' });
         const playerCount = session.players.size;
@@ -920,10 +987,13 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           .filter((i) => i.isEvidence)
           .map((i) => ({ id: i.id, name: i.name }));
 
-        // Emit story:ready WITHOUT waiting for opening image.
-        // The opening image will arrive later via story:image-ready { kind: 'opening' }.
+        // If image finished BEFORE world gen, include it directly in story:ready
+        // so clients that haven't seen the earlier story:image-ready (because
+        // worldMeta was null) still get it. Clients also listen for a later
+        // story:image-ready if the image arrives after.
+        const alreadyReadyImageUrl = store.get(sessionId)?.openingImageUrl ?? null;
         io.to(sessionId).emit('story:ready', {
-          openingImageUrl: null,
+          openingImageUrl: alreadyReadyImageUrl,
           world: {
             title: result.world.meta.title,
             setting: result.world.meta.setting,
@@ -933,50 +1003,16 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           npcs,
           evidenceItems,
         });
+        if (alreadyReadyImageUrl) {
+          console.log(`[story ${sid}]   (opening image was already ready, included in story:ready)`);
+        }
         store.markOpeningReady(sessionId);
-        console.log(`[story ${sid}] ✓ emit story:ready (total=${Date.now() - tStoryStart}ms) — image pending`);
+        console.log(`[story ${sid}] ✓ emit story:ready (total=${Date.now() - tStoryStart}ms) — opening image running in parallel`);
+        void openingImagePromise;
 
-        // Kick off opening image ASYNC — no blocking
-        io.to(sessionId).emit('story:status', { phase: 'image', message: 'Açılış görseli oluşturuluyor...' });
-        const tImgStart = Date.now();
-        void generateOpeningImage(result.world).then((openingUrl) => {
-          const imgMs = Date.now() - tImgStart;
-          if (openingUrl) {
-            store.setOpeningImage(sessionId, openingUrl);
-            io.to(sessionId).emit('story:image-ready', {
-              kind: 'opening',
-              id: 'opening',
-              url: openingUrl,
-            });
-            console.log(`[story ${sid}] ✓ opening image ready (${imgMs}ms, ${(openingUrl.length / 1024).toFixed(0)}KB)`);
-          } else {
-            console.warn(`[story ${sid}] ✗ opening image failed (${imgMs}ms)`);
-          }
-        });
-
-        // Kick off async room + NPC image generation (non-blocking)
-        void generateAllRoomImages(result.world, (res) => {
-          if (res.url) {
-            store.setRoomImage(sessionId, res.roomId, res.url);
-            io.to(sessionId).emit('story:image-ready', {
-              kind: 'room',
-              id: res.roomId,
-              url: res.url,
-            });
-            console.log(`[story ${sid}]   room image ready: ${res.roomId}`);
-          }
-        });
-        void generateAllNpcPortraits(result.world, (res) => {
-          if (res.url) {
-            store.setNpcPortrait(sessionId, res.npcId, res.url);
-            io.to(sessionId).emit('story:image-ready', {
-              kind: 'npc',
-              id: res.npcId,
-              url: res.url,
-            });
-            console.log(`[story ${sid}]   npc portrait ready: ${res.npcId}`);
-          }
-        });
+        // NOTE: per-room and per-NPC images intentionally NOT generated.
+        // Only the single opening cinematic image matters; skipping these
+        // saves ~7-8 image API calls per session and keeps us under the 5/min rate limit.
       } catch (err) {
         console.error(`[story ${sid}] ✗ failed:`, err);
         io.to(sessionId).emit('story:status', {
@@ -1155,6 +1191,14 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const player = store.getPlayer(sessionId, playerId);
       if (!player) { callback({ success: false, error: 'Player not found in session' }); return; }
 
+      // Cancel any pending disconnect timer — the player is back.
+      const graceTimer = pendingDisconnects.get(playerId);
+      const wasInGrace = !!graceTimer;
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        pendingDisconnects.delete(playerId);
+      }
+
       store.updatePlayer(sessionId, playerId, { isConnected: true, lastActiveAt: Date.now() });
       socketMap.set(socket.id, { sessionId, playerId });
       socket.join(sessionId);
@@ -1181,13 +1225,18 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       callback({ success: true });
       void store.sync(sessionId);
 
-      socket.to(sessionId).emit('player:reconnected', {
-        playerId,
-        playerName: player.name,
-        allPlayers,
-      });
-
-      console.log(`[socket] ${player.name} reconnected to session ${sessionId.slice(0, 8)}`);
+      // Only broadcast "reconnected" if the disconnect actually went public
+      // (grace timer expired and fired). Brief in-grace reconnects are silent.
+      if (!wasInGrace) {
+        socket.to(sessionId).emit('player:reconnected', {
+          playerId,
+          playerName: player.name,
+          allPlayers,
+        });
+        console.log(`[socket] ${player.name} reconnected to session ${sessionId.slice(0, 8)}`);
+      } else {
+        console.log(`[socket] ${player.name} reconnected inside grace period — silent`);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -1200,16 +1249,40 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const player = store.getPlayer(sessionId, playerId);
       if (!player) return;
 
-      store.updatePlayer(sessionId, playerId, { isConnected: false });
+      // If the player has ANOTHER socket still open (multi-tab), don't mark
+      // them as disconnected at all.
+      if (findSocketsForPlayer(playerId).length > 0) {
+        console.log(`[socket] ${player.name} closed one tab but still has other sockets`);
+        return;
+      }
 
-      const allPlayers = getAllPlayerDTOs(store, sessionId);
-      io.to(sessionId).emit('player:left', {
-        playerId,
-        playerName: player.name,
-        allPlayers,
-      });
+      // Grace period: wait DISCONNECT_GRACE_MS before broadcasting. If the
+      // player rejoins in the meantime, the timer is cancelled and no chat
+      // "disconnected"/"reconnected" flicker is shown.
+      const existing = pendingDisconnects.get(playerId);
+      if (existing) clearTimeout(existing);
 
-      console.log(`[socket] ${player.name} disconnected from session ${sessionId.slice(0, 8)}`);
+      const timer = setTimeout(() => {
+        pendingDisconnects.delete(playerId);
+
+        // If they already reconnected on another socket, nothing to do.
+        if (findSocketsForPlayer(playerId).length > 0) return;
+
+        const stillHere = store.getPlayer(sessionId, playerId);
+        if (!stillHere) return;
+
+        store.updatePlayer(sessionId, playerId, { isConnected: false });
+        const allPlayers = getAllPlayerDTOs(store, sessionId);
+        io.to(sessionId).emit('player:left', {
+          playerId,
+          playerName: stillHere.name,
+          allPlayers,
+        });
+        console.log(`[socket] ${stillHere.name} disconnected from session ${sessionId.slice(0, 8)} (after ${DISCONNECT_GRACE_MS}ms grace)`);
+      }, DISCONNECT_GRACE_MS);
+
+      pendingDisconnects.set(playerId, timer);
+      console.log(`[socket] ${player.name} disconnect pending (${DISCONNECT_GRACE_MS}ms grace)`);
     });
   });
 }

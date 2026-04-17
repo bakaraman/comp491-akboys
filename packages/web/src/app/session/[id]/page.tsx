@@ -127,6 +127,38 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [openingDismissed, setOpeningDismissed] = useState(false);
 
+  /* ---- Pre-fetch opening narration TTS as soon as story is ready ---- */
+  const [openingTtsUrl, setOpeningTtsUrl] = useState<string | null>(null);
+  const ttsPrefetchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const narration = mp.worldMeta?.openingNarration;
+    if (!narration || narration.length < 20) return;
+    if (ttsPrefetchedFor.current === narration) return;
+    ttsPrefetchedFor.current = narration;
+
+    const t0 = Date.now();
+    console.log('[session] TTS pre-fetch start (voice=ash, chars=' + narration.length + ')');
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+          body: JSON.stringify({ text: narration, voice: 'ash' }),
+        });
+        if (!res.ok) {
+          console.error('[session] TTS pre-fetch HTTP ' + res.status);
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        console.log(`[session] TTS pre-fetched (${Date.now() - t0}ms, ${blob.size} bytes)`);
+        setOpeningTtsUrl(url);
+      } catch (err) {
+        console.error('[session] TTS pre-fetch failed', err);
+      }
+    })();
+  }, [mp.worldMeta?.openingNarration]);
+
   /* ---- Multiplayer lobby/voting state ---- */
   const [joinError, setJoinError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
@@ -282,6 +314,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onGenerateStory={(prompt) => mp.generateStory(prompt)}
         storyStatus={mp.storyStatus}
         storyReady={mp.worldMeta !== null}
+        imageReady={!!mp.worldMeta?.openingImageUrl}
+        ttsReady={openingTtsUrl !== null}
         onStartGame={handleStartGame}
         isStartingGame={isStartingGame}
       />
@@ -384,10 +418,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             {typingNames.length === 1 ? `${typingNames[0]} is typing...` : `${typingNames.join(' and ')} are typing...`}
           </div>
         )}
-        {mp.batchInfo && !mp.isNarratorStreaming && (
-          <div style={{ color: '#6a6050', fontSize: '12px', padding: '8px 14px', fontFamily: 'monospace', backgroundColor: '#111', border: '1px solid #1e1e1e', borderRadius: '8px', display: 'inline-block' }}>
-            Gathering actions... ({mp.batchInfo.queueSize} queued)
-          </div>
+        {(mp.actionQueue.waiting.length > 0 || mp.actionQueue.processingPlayerId) && (
+          <QueueBanner queue={mp.actionQueue} myPlayerId={mp.myPlayerId} />
         )}
         {mp.isNarratorStreaming && !mp.streamingText && (
           <div style={{ color: '#4a4540', fontStyle: 'italic', fontSize: '14px', padding: '8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -478,22 +510,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             myName={myPlayer?.name}
             myColor={myPlayer?.color}
             onTravel={(roomName) => {
-              // Include direction for clearer AI interpretation
-              const currentRoom = mapRooms.find((r) => r.id === myPlayer?.currentRoomId);
-              const targetRoom = mapRooms.find((r) => r.name === roomName);
-              let direction: string | null = null;
-              if (currentRoom && targetRoom) {
-                for (const [dir, roomId] of Object.entries(currentRoom.exits)) {
-                  if (roomId === targetRoom.id) {
-                    direction = dir;
-                    break;
-                  }
-                }
-              }
-              const command = direction
-                ? `I go ${direction} to the ${roomName}.`
-                : `I go to the ${roomName}.`;
-              mp.sendAction(command);
+              mp.sendAction(`${roomName} odasına gidiyorum.`);
             }}
             disabled={mp.isNarratorStreaming}
           />
@@ -528,9 +545,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       {mp.gameState === 'playing' && mp.worldMeta && !openingDismissed && !mp.gameOver && (
         <OpeningCinematic
           title={mp.worldMeta.title}
-          setting={mp.worldMeta.setting}
           openingNarration={mp.worldMeta.openingNarration}
           openingImageUrl={mp.worldMeta.openingImageUrl}
+          ttsAudioUrl={openingTtsUrl}
           onStart={() => setOpeningDismissed(true)}
         />
       )}
@@ -548,7 +565,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           }
           summary={mp.gameOver.summary}
           onHome={() => { window.location.href = '/'; }}
-          onPlayAgain={() => { window.location.href = '/multiplayer'; }}
+          onPlayAgain={() => { window.location.href = '/'; }}
         />
       )}
 
@@ -747,6 +764,96 @@ function AccuseModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  QueueBanner — shows who's waiting, who's being processed           */
+/* ================================================================== */
+
+interface QueueEntry {
+  playerId: string;
+  playerName: string;
+  playerColor: string;
+  message: string;
+}
+
+function QueueBanner({
+  queue,
+  myPlayerId,
+}: {
+  queue: {
+    waiting: QueueEntry[];
+    processingPlayerId: string | null;
+    processingPlayerName: string | null;
+  };
+  myPlayerId: string | null;
+}) {
+  const myWaitIndex = queue.waiting.findIndex((w) => w.playerId === myPlayerId);
+  const iAmProcessing = queue.processingPlayerId === myPlayerId;
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        gap: '6px',
+        padding: '10px 14px',
+        backgroundColor: '#111',
+        border: '1px solid #1e1e1e',
+        borderRadius: '8px',
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#8a8070',
+        margin: '8px 0',
+      }}
+    >
+      {queue.processingPlayerId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              backgroundColor: '#d4a843',
+              animation: 'pulse 1.2s ease-in-out infinite',
+              flexShrink: 0,
+            }}
+          />
+          <span>
+            {iAmProcessing ? (
+              <>Anlatıcı <strong style={{ color: '#d4a843' }}>sana</strong> yazıyor…</>
+            ) : (
+              <>Anlatıcı <strong style={{ color: '#d4a843' }}>{queue.processingPlayerName}</strong>'e yazıyor…</>
+            )}
+          </span>
+        </div>
+      )}
+      {queue.waiting.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span style={{ color: '#5a5545' }}>Sırada:</span>
+          {queue.waiting.map((w, i) => {
+            const isMe = w.playerId === myPlayerId;
+            return (
+              <span
+                key={`${w.playerId}-${i}`}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                  backgroundColor: isMe ? '#1a1510' : '#0d0d0d',
+                  border: `1px solid ${isMe ? '#d4a843' : '#1e1e1e'}`,
+                  color: isMe ? '#d4a843' : w.playerColor,
+                  fontSize: '11px',
+                  fontWeight: isMe ? 'bold' : 'normal',
+                }}
+              >
+                {isMe ? `SEN (#${myWaitIndex + (queue.processingPlayerId ? 2 : 1)})` : w.playerName}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

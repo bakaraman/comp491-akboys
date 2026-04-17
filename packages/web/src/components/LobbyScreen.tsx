@@ -32,6 +32,10 @@ export interface LobbyScreenProps {
   onGenerateStory: (prompt: string) => Promise<boolean> | void;
   storyStatus: { phase: string; message?: string } | null;
   storyReady: boolean;
+  /** True when opening image is loaded. */
+  imageReady: boolean;
+  /** True when opening narration TTS has been pre-fetched. */
+  ttsReady: boolean;
   onStartGame: () => void | Promise<unknown>;
   isStartingGame: boolean;
 }
@@ -45,6 +49,8 @@ export function LobbyScreen({
   onGenerateStory,
   storyStatus,
   storyReady,
+  imageReady,
+  ttsReady,
   onStartGame,
   isStartingGame,
 }: LobbyScreenProps) {
@@ -55,9 +61,11 @@ export function LobbyScreen({
     !!storyStatus && storyStatus.phase !== 'ready' && storyStatus.phase !== 'failed' && !storyReady;
   const generationFailed = storyStatus?.phase === 'failed';
 
+  const promptReady = prompt.trim().length >= 5;
+
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!isHost || submitted || generationInFlight) return;
+    if (!isHost || submitted || generationInFlight || !promptReady) return;
     setSubmitted(true);
     try {
       await onGenerateStory(prompt.trim());
@@ -299,36 +307,18 @@ export function LobbyScreen({
                   {preset}
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => setPrompt('')}
-                disabled={generationInFlight || submitted}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: 'transparent',
-                  border: '1px dashed #2a2520',
-                  borderRadius: '16px',
-                  color: '#6a6050',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  letterSpacing: '1px',
-                  cursor: generationInFlight || submitted ? 'default' : 'pointer',
-                }}
-              >
-                {T.lobby.promptSurprise}
-              </button>
             </div>
 
             {/* Submit */}
             <button
               type="submit"
-              disabled={generationInFlight || submitted}
+              disabled={generationInFlight || submitted || !promptReady}
               style={{
                 width: '100%',
                 marginTop: '20px',
                 padding: '16px',
-                backgroundColor: generationInFlight || submitted ? '#2a2010' : '#d4a843',
-                color: generationInFlight || submitted ? '#5a5040' : '#0a0a0a',
+                backgroundColor: generationInFlight || submitted || !promptReady ? '#2a2010' : '#d4a843',
+                color: generationInFlight || submitted || !promptReady ? '#5a5040' : '#0a0a0a',
                 border: 'none',
                 borderRadius: '8px',
                 fontSize: '15px',
@@ -336,7 +326,7 @@ export function LobbyScreen({
                 fontFamily: 'monospace',
                 letterSpacing: '2px',
                 textTransform: 'uppercase',
-                cursor: generationInFlight || submitted ? 'not-allowed' : 'pointer',
+                cursor: generationInFlight || submitted || !promptReady ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
               }}
             >
@@ -402,64 +392,89 @@ export function LobbyScreen({
           </div>
         )}
 
-        {/* Story ready — Start button */}
-        {storyReady && (
-          <div
-            style={{
-              marginTop: '24px',
-              backgroundColor: '#111',
-              border: '1px solid #d4a843',
-              borderRadius: '14px',
-              padding: '32px',
-            }}
-          >
-            <p
+        {/* Story ready — Start button (gated on TTS only; image is best-effort) */}
+        {storyReady && (() => {
+          const gateReady = ttsReady;
+          void imageReady;
+          return (
+            <div
               style={{
-                fontSize: '15px',
-                color: '#d4a843',
-                fontFamily: 'Georgia, serif',
-                fontStyle: 'italic',
-                marginBottom: '18px',
+                marginTop: '24px',
+                backgroundColor: '#111',
+                border: `1px solid ${gateReady ? '#d4a843' : '#2a2520'}`,
+                borderRadius: '14px',
+                padding: '32px',
               }}
             >
-              Hikaye hazır. Perde açılıyor.
-            </p>
-            {isHost && (
-              <button
-                onClick={() => onStartGame()}
-                disabled={isStartingGame}
-                style={{
-                  padding: '16px 48px',
-                  backgroundColor: isStartingGame ? '#2a2010' : '#d4a843',
-                  color: isStartingGame ? '#5a5040' : '#0a0a0a',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '15px',
-                  fontWeight: 'bold',
-                  fontFamily: 'monospace',
-                  letterSpacing: '2px',
-                  textTransform: 'uppercase',
-                  cursor: isStartingGame ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                {isStartingGame ? T.opening.loading : 'Perdeyi Aç'}
-              </button>
-            )}
-            {!isHost && (
               <p
                 style={{
-                  fontSize: '12px',
-                  color: '#5a5545',
-                  fontFamily: 'monospace',
-                  letterSpacing: '1px',
+                  fontSize: '15px',
+                  color: '#d4a843',
+                  fontFamily: 'Georgia, serif',
+                  fontStyle: 'italic',
+                  marginBottom: '8px',
                 }}
               >
-                {T.lobby.waitingForHost}
+                Hikaye hazır. Perde açılıyor.
               </p>
-            )}
-          </div>
-        )}
+
+              {!gateReady && (
+                <p
+                  style={{
+                    fontSize: '11px',
+                    color: '#7a6a50',
+                    fontFamily: 'monospace',
+                    letterSpacing: '1px',
+                    textTransform: 'uppercase',
+                    marginBottom: '18px',
+                  }}
+                >
+                  Ses hazırlanıyor...
+                </p>
+              )}
+              {gateReady && <div style={{ marginBottom: '18px' }} />}
+
+              {isHost && (
+                <button
+                  onClick={() => onStartGame()}
+                  disabled={isStartingGame || !gateReady}
+                  style={{
+                    padding: '16px 48px',
+                    backgroundColor: isStartingGame || !gateReady ? '#2a2010' : '#d4a843',
+                    color: isStartingGame || !gateReady ? '#5a5040' : '#0a0a0a',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace',
+                    letterSpacing: '2px',
+                    textTransform: 'uppercase',
+                    cursor: isStartingGame || !gateReady ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {isStartingGame
+                    ? T.opening.loading
+                    : !gateReady
+                    ? 'Hazırlanıyor…'
+                    : 'Perdeyi Aç'}
+                </button>
+              )}
+              {!isHost && (
+                <p
+                  style={{
+                    fontSize: '12px',
+                    color: '#5a5545',
+                    fontFamily: 'monospace',
+                    letterSpacing: '1px',
+                  }}
+                >
+                  {T.lobby.waitingForHost}
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

@@ -56,7 +56,7 @@ export function FinaleCinematic({
     console.log(`${DEBUG} music: fade-in`);
     void audio.play().catch(() => {});
     const start = Date.now();
-    const target = 0.2;
+    const target = 0.10;
     const duration = 1800;
     const iv = setInterval(() => {
       const pct = Math.min(1, (Date.now() - start) / duration);
@@ -168,7 +168,7 @@ export function FinaleCinematic({
         const res = await fetch(`${API_BASE}/api/chat/tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ text: fullText, voice: 'shimmer' }),
+          body: JSON.stringify({ text: fullText, voice: 'ash' }),
         });
         if (!res.ok) {
           console.error(`${DEBUG} TTS HTTP ${res.status}`);

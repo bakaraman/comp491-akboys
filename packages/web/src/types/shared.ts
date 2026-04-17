@@ -164,6 +164,16 @@ export interface ServerToClientEvents {
     timeRemaining: number;
   }) => void;
   'action:batch-countdown': (data: { timeRemaining: number; queueSize: number }) => void;
+  'session:queue': (data: {
+    waiting: Array<{
+      playerId: string;
+      playerName: string;
+      playerColor: string;
+      message: string;
+    }>;
+    processingPlayerId: string | null;
+    processingPlayerName: string | null;
+  }) => void;
   'session:state': (data: { session: SessionStateDTO }) => void;
   'session:error': (data: { message: string }) => void;
   'scenario:updated': (data: {

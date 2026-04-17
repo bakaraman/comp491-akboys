@@ -19,9 +19,12 @@ function client(): OpenAI {
   if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return _client;
 }
-const MODEL = 'gpt-5.4-mini';
-const MAX_TOKENS = 6000;
-const TEMPERATURE = 0.9;
+const MODEL = 'gpt-5.4';
+// Per OpenAI docs, gpt-5.4 defaults to 'none' reasoning. Lowest latency for
+// this extraction-style task. SDK type union doesn't include 'none' yet, so
+// we cast at the call site.
+const REASONING_EFFORT = 'none';
+const MAX_TOKENS = 8000;
 
 const DEBUG = '[world-gen]';
 
@@ -41,10 +44,16 @@ STRUCTURAL RULES:
 
 CRITICAL EXIT RULES:
 - Each room has 6 exit slots: north, south, east, west, up, down.
-- Use null (NOT empty string "") when no exit in that direction.
-- When there IS an exit, use the EXACT room id from rooms[] (snake_case, no extras).
+- Use the JSON literal null (NOT the string "null", NOT "", NOT ":", NOT ".") when there is no exit in that direction.
+- When there IS an exit, use the EXACT room id from rooms[] (snake_case, no extras, no colons).
 - Exits are HINTS — the narrator has final movement authority at runtime.
 - Still, prefer bidirectional exits (A.north=B → B.south=A) and a connected graph for sensible navigation.
+
+OPENING NARRATION (important — this is the only scene-setting text the player sees):
+- 4-6 Turkish sentences. Clear, natural prose. No bullet points, no headings. **Not literary — normal anlatıcı tonu.**
+- Bake in era + location + mood naturally (e.g. "1947 sonbaharı. Yağmurlu bir yatılı okul. Gece yarısı, çan kulesinden bir çığlık yankılandı.") rather than stating them like labels.
+- Each sentence drops a concrete fact. No poetic metaphors, no ornamental phrases.
+- Write for the ear — TTS will read it.
 
 KILLER AMBIGUITY (essential for a good mystery):
 - EVERY NPC (innocent or guilty) must have:
@@ -61,9 +70,10 @@ LANGUAGE (STRICT):
 - imagePrompt, portraitPrompt, visualStylePrompt, openingImagePrompt: English (for image generation).
 
 TURKISH STYLE:
-- Literary, flowing, atmospheric. Channel Chandler + Pamuk.
-- NOT robotic or translated-feeling. Native-sounding prose.
-- Noir mood: rain, shadows, smoke, moral ambiguity.
+- Clear, direct, natural prose. Short sentences. Normal anlatıcı tonu.
+- NOT ornamental, NOT literary-heavy, NOT Orhan Pamuk. No florid metaphors.
+- Native Turkish, factual, concrete. Every line earns its place.
+- Atmosphere comes from specific DETAILS (burnt coffee smell, a cracked windowpane) — not from poetic language.
 
 VISUAL STYLE:
 - meta.visualStylePrompt: 1-2 English sentences, concrete art direction.
@@ -79,9 +89,9 @@ OUTPUT: Single JSON object matching the provided schema exactly.`;
 function buildUserPrompt(hostPrompt: string, playerCount: number): string {
   const cleaned = hostPrompt.trim();
   if (!cleaned) {
-    return `Create a surprise noir mystery for ${playerCount} players. Choose any evocative setting and era yourself — 1920s Chicago, 1970s Istanbul, a corporate cyberpunk megacity, a medieval castle feast, a deep-space station, etc. Write everything in flowing literary Turkish.`;
+    return `Create a surprise mystery for ${playerCount} players. Choose any evocative setting and era yourself — 1920s Chicago, 1970s Istanbul, a corporate cyberpunk megacity, a medieval castle feast, a deep-space station, etc. Write everything in clear, direct, natural Turkish prose. Short sentences. No florid metaphors.`;
   }
-  return `HOST PROMPT: "${cleaned}"\n\nCreate a noir mystery for ${playerCount} players based on this theme. Interpret freely but stay true to the prompt. Write everything in flowing literary Turkish.`;
+  return `HOST PROMPT: "${cleaned}"\n\nCreate a mystery for ${playerCount} players based on this theme. Interpret freely but stay true to the prompt. Write everything in clear, direct, natural Turkish prose. Short sentences. No florid metaphors.`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,7 +203,7 @@ async function callOpenAIOnce(
     ],
     response_format: zodResponseFormat(WorldSchema, 'noir_world'),
     max_completion_tokens: MAX_TOKENS,
-    temperature: TEMPERATURE,
+    reasoning_effort: REASONING_EFFORT as 'low',
   });
   console.log(`${DEBUG} OpenAI call ✓ (${Date.now() - t0}ms)`);
 
