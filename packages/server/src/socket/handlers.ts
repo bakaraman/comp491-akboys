@@ -1338,12 +1338,16 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // Check if all connected players have voted
       const connectedPlayers = Array.from(session.players.values()).filter(p => p.isConnected);
       const allVoted = connectedPlayers.every(p => session.activeAccusation!.votes.has(p.id));
+      const voteCount = session.activeAccusation.votes.size;
 
       if (allVoted) {
-        resolveAccusationVote(io, store, sessionId);
+        // Defer so the triggering socket has completed its handler cycle
+        // before broadcast emits fan out (ensures all sockets, including the
+        // last voter's own, receive the subsequent events).
+        setImmediate(() => resolveAccusationVote(io, store, sessionId));
       }
 
-      console.log(`[accusation] ${playerId.slice(0, 8)} voted ${vote} (${session.activeAccusation.votes.size}/${connectedPlayers.length})`);
+      console.log(`[accusation] ${playerId.slice(0, 8)} voted ${vote} (${voteCount}/${connectedPlayers.length})`);
     });
 
     /* ================================================================ */

@@ -22,6 +22,7 @@ import { EvidenceBoard } from '@/components/EvidenceBoard';
 import type { EvidenceItem, SuspectInfo } from '@/components/EvidenceBoard';
 import { LobbyScreen } from '@/components/LobbyScreen';
 import { FinaleCinematic } from '@/components/FinaleCinematic';
+import { useAmbientMusic } from '@/hooks/useAmbientMusic';
 import { T } from '@/lib/tr';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
@@ -226,6 +227,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
+
+  // Ambient noir music — louder during opening/finale, quieter mid-game
+  const ambientActive =
+    isMultiplayer &&
+    (mp.gameState === 'lobby' ||
+      mp.gameState === 'voting' ||
+      mp.gameState === 'playing' ||
+      mp.gameState === 'ended');
+  const ambientBoost =
+    mp.gameState === 'ended' || mp.worldMeta !== null && mp.gameState !== 'playing';
+  useAmbientMusic(ambientActive, ambientBoost ? 0.18 : 0.05);
 
   /* Auto-refresh session info when MP game transitions to playing state
      (scenario is confirmed, title/meta becomes available) */
@@ -689,10 +701,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               borderRadius: '14px', padding: '28px',
             }}>
               <h2 style={{ color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0, marginBottom: '6px' }}>
-                Final Accusation
+                {T.accuse.title}
               </h2>
               <p style={{ color: '#9a9080', fontSize: '13px', lineHeight: '1.6', marginBottom: '20px' }}>
-                Who committed the crime? Choose wisely — a wrong accusation ends the case.
+                {T.accuse.unanimousRequired}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
                 {sessionInfo.scenarioMeta.npcs.filter((npc) => (spGameState?.visitedRooms || []).includes(npc.roomId || '')).map((npc) => {
