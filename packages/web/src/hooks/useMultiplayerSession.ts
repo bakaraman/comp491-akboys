@@ -108,6 +108,24 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     endReason: 'solved' | 'wrong_accusation' | 'turn_limit' | 'sanity_death';
     summary: string;
   } | null>(null);
+  const [storyStatus, setStoryStatus] = useState<{
+    phase: 'queued' | 'generating' | 'validating' | 'image' | 'ready' | 'failed';
+    message?: string;
+  } | null>(null);
+  const [worldMeta, setWorldMeta] = useState<{
+    title: string;
+    setting: string;
+    centralMystery: string;
+    openingNarration: string;
+    ambientTrack: string;
+    tone: string;
+    openingImageUrl: string | null;
+    rooms: Array<{ id: string; name: string; exits: Record<string, string | null> }>;
+    npcs: Array<{ id: string; name: string; role: string }>;
+    evidenceItems: Array<{ id: string; name: string }>;
+  } | null>(null);
+  const [roomImages, setRoomImages] = useState<Record<string, string>>({});
+  const [npcPortraits, setNpcPortraits] = useState<Record<string, string>>({});
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -336,6 +354,34 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setGameState('ended');
     });
 
+    /* -- Procedural story generation events (Velvet Shadow v2) -- */
+    socket.on('story:status', (data) => {
+      setStoryStatus(data);
+    });
+
+    socket.on('story:ready', (data) => {
+      setWorldMeta({
+        title: data.world.title,
+        setting: data.world.setting,
+        centralMystery: data.world.centralMystery,
+        openingNarration: data.world.openingNarration,
+        ambientTrack: data.world.ambientTrack,
+        tone: data.world.tone,
+        openingImageUrl: data.openingImageUrl,
+        rooms: data.rooms,
+        npcs: data.npcs,
+        evidenceItems: data.evidenceItems,
+      });
+    });
+
+    socket.on('story:image-ready', (data) => {
+      if (data.kind === 'room') {
+        setRoomImages((prev) => ({ ...prev, [data.id]: data.url }));
+      } else if (data.kind === 'npc') {
+        setNpcPortraits((prev) => ({ ...prev, [data.id]: data.url }));
+      }
+    });
+
     /* -- Connect -- */
     socket.connect();
 
@@ -494,6 +540,25 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     [sessionId, myPlayerId],
   );
 
+  const generateStory = useCallback(
+    async (hostPrompt: string): Promise<boolean> => {
+      const socket = socketRef.current;
+      if (!socket?.connected || !myPlayerId) { setError('Sunucuya bağlı değil'); return false; }
+      return new Promise((resolve) => {
+        socket.emit('story:generate', { sessionId, playerId: myPlayerId, hostPrompt }, (resp) => {
+          if (resp.success) { setError(null); resolve(true); }
+          else {
+            setError(resp.error || 'Hikaye oluşturulamadı');
+            setToast(resp.error || 'Hikaye oluşturulamadı');
+            setTimeout(() => setToast(null), 3000);
+            resolve(false);
+          }
+        });
+      });
+    },
+    [sessionId, myPlayerId],
+  );
+
   /* ---- Return ---- */
 
   return {
@@ -517,6 +582,10 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     sharedEvidence,
     activeVote,
     gameOver,
+    storyStatus,
+    worldMeta,
+    roomImages,
+    npcPortraits,
 
     joinSession,
     selectScenario,
@@ -531,5 +600,6 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     shareEvidence,
     proposeAccusation,
     voteAccusation,
+    generateStory,
   };
 }

@@ -161,6 +161,12 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string; vote: 'guilty' | 'not_guilty' },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+
+  /** Host triggers procedural world generation (Velvet Shadow v2) */
+  'story:generate': (
+    data: { sessionId: string; playerId: string; hostPrompt: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,6 +301,42 @@ export interface ServerToClientEvents {
     playerId: string;
     sanity: number;
     delta: number;
+  }) => void;
+
+  /** Story generation progress updates (procedural world) */
+  'story:status': (data: {
+    phase: 'queued' | 'generating' | 'validating' | 'image' | 'ready' | 'failed';
+    message?: string;
+  }) => void;
+
+  /** Full world payload ready (all text content, images may still be loading) */
+  'story:ready': (data: {
+    openingImageUrl: string | null;
+    world: {
+      title: string;
+      setting: string;
+      centralMystery: string;
+      openingNarration: string;
+      ambientTrack: string;
+      tone: string;
+    };
+    /** Roster of rooms for the minimap. */
+    rooms: Array<{
+      id: string;
+      name: string;
+      exits: Record<string, string | null>;
+    }>;
+    /** Roster of NPCs. */
+    npcs: Array<{ id: string; name: string; role: string }>;
+    /** Roster of all evidence items (for accuse modal). */
+    evidenceItems: Array<{ id: string; name: string }>;
+  }) => void;
+
+  /** An async-loaded image finished (room or NPC portrait) */
+  'story:image-ready': (data: {
+    kind: 'room' | 'npc';
+    id: string;
+    url: string;
   }) => void;
 }
 

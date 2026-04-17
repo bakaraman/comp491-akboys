@@ -23,6 +23,7 @@ import type {
   WorldStateEvent,
   AccusationVote,
   NPCState,
+  WorldData,
 } from '@akboys/shared';
 import { PLAYER_COLORS } from '@akboys/shared';
 
@@ -84,6 +85,26 @@ export interface SessionData {
 
   /** Multiplayer turn counter — incremented after each action batch (#25) */
   mpTurnCount: number;
+
+  /* ─────────── Procedural world (Velvet Shadow v2) ─────────── */
+
+  /** Host's theme prompt (empty = surprise) */
+  hostPrompt: string;
+
+  /** AI-generated world (null until story:generate completes) */
+  world: WorldData | null;
+
+  /** Opening atmosphere image URL (null until ready) */
+  openingImageUrl: string | null;
+
+  /** Per-room generated image URLs (null until ready) */
+  roomImages: Record<string, string | null>;
+
+  /** Per-NPC generated portrait URLs (null until ready) */
+  npcPortraits: Record<string, string | null>;
+
+  /** Whether opening is ready (image + TTS if used) — game can start */
+  openingReady: boolean;
 }
 
 /** Contract every session store must satisfy */
@@ -114,6 +135,14 @@ export interface SessionStore {
   /* Action queue */
   queueAction(sessionId: string, action: PlayerAction): void;
   drainActionQueue(sessionId: string): PlayerAction[];
+
+  /* Procedural world helpers */
+  setHostPrompt(sessionId: string, prompt: string): void;
+  setWorld(sessionId: string, world: WorldData): void;
+  setOpeningImage(sessionId: string, url: string | null): void;
+  setRoomImage(sessionId: string, roomId: string, url: string | null): void;
+  setNpcPortrait(sessionId: string, npcId: string, url: string | null): void;
+  markOpeningReady(sessionId: string): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,6 +215,12 @@ export class MemorySessionStore implements SessionStore {
       npcStates: new Map(),
       activeAccusation: null,
       mpTurnCount: 0,
+      hostPrompt: '',
+      world: null,
+      openingImageUrl: null,
+      roomImages: {},
+      npcPortraits: {},
+      openingReady: false,
     };
 
     this.sessions.set(session.id, session);
@@ -369,6 +404,53 @@ export class MemorySessionStore implements SessionStore {
     session.actionQueue = [];
     return actions;
   }
+
+  /* ─────────── Procedural world helpers ─────────── */
+
+  setHostPrompt(sessionId: string, prompt: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.hostPrompt = prompt;
+    session.lastActivityAt = Date.now();
+  }
+
+  setWorld(sessionId: string, world: WorldData): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.world = world;
+    // Initialize per-room / per-NPC image slots as null.
+    session.roomImages = Object.fromEntries(world.rooms.map((r) => [r.id, null]));
+    session.npcPortraits = Object.fromEntries(world.npcs.map((n) => [n.id, null]));
+    session.lastActivityAt = Date.now();
+  }
+
+  setOpeningImage(sessionId: string, url: string | null): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.openingImageUrl = url;
+    session.lastActivityAt = Date.now();
+  }
+
+  setRoomImage(sessionId: string, roomId: string, url: string | null): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.roomImages[roomId] = url;
+    session.lastActivityAt = Date.now();
+  }
+
+  setNpcPortrait(sessionId: string, npcId: string, url: string | null): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.npcPortraits[npcId] = url;
+    session.lastActivityAt = Date.now();
+  }
+
+  markOpeningReady(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.openingReady = true;
+    session.lastActivityAt = Date.now();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -431,6 +513,12 @@ interface StoredSessionData {
   npcStates: Array<{ id: string; disposition: string; memories: string[]; metPlayers: string[]; currentRoomId: string }>;
   activeAccusation: { proposerId: string; proposerName: string; suspectId: string; suspectName: string; votes: Record<string, string>; startedAt: number; expiresAt: number } | null;
   mpTurnCount: number;
+  hostPrompt?: string;
+  world?: WorldData | null;
+  openingImageUrl?: string | null;
+  roomImages?: Record<string, string | null>;
+  npcPortraits?: Record<string, string | null>;
+  openingReady?: boolean;
 }
 
 function serializeSession(session: SessionData): StoredSessionData {
@@ -469,6 +557,12 @@ function serializeSession(session: SessionData): StoredSessionData {
         }
       : null,
     mpTurnCount: session.mpTurnCount,
+    hostPrompt: session.hostPrompt,
+    world: session.world,
+    openingImageUrl: session.openingImageUrl,
+    roomImages: session.roomImages,
+    npcPortraits: session.npcPortraits,
+    openingReady: session.openingReady,
   };
 }
 
@@ -517,6 +611,12 @@ function deserializeSession(data: StoredSessionData): SessionData {
         }
       : null,
     mpTurnCount: data.mpTurnCount || 0,
+    hostPrompt: data.hostPrompt ?? '',
+    world: data.world ?? null,
+    openingImageUrl: data.openingImageUrl ?? null,
+    roomImages: data.roomImages ?? {},
+    npcPortraits: data.npcPortraits ?? {},
+    openingReady: data.openingReady ?? false,
   };
 }
 
@@ -616,5 +716,35 @@ export class FirestoreSessionStore extends MemorySessionStore {
     const actions = super.drainActionQueue(sessionId);
     void this.sync(sessionId);
     return actions;
+  }
+
+  override setHostPrompt(sessionId: string, prompt: string): void {
+    super.setHostPrompt(sessionId, prompt);
+    void this.sync(sessionId);
+  }
+
+  override setWorld(sessionId: string, world: WorldData): void {
+    super.setWorld(sessionId, world);
+    void this.sync(sessionId);
+  }
+
+  override setOpeningImage(sessionId: string, url: string | null): void {
+    super.setOpeningImage(sessionId, url);
+    void this.sync(sessionId);
+  }
+
+  override setRoomImage(sessionId: string, roomId: string, url: string | null): void {
+    super.setRoomImage(sessionId, roomId, url);
+    void this.sync(sessionId);
+  }
+
+  override setNpcPortrait(sessionId: string, npcId: string, url: string | null): void {
+    super.setNpcPortrait(sessionId, npcId, url);
+    void this.sync(sessionId);
+  }
+
+  override markOpeningReady(sessionId: string): void {
+    super.markOpeningReady(sessionId);
+    void this.sync(sessionId);
   }
 }

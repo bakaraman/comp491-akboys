@@ -91,6 +91,10 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string; vote: 'guilty' | 'not_guilty' },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+  'story:generate': (
+    data: { sessionId: string; playerId: string; hostPrompt: string },
+    callback: (response: { success: boolean; error?: string }) => void,
+  ) => void;
 }
 
 export interface SessionStateDTO {
@@ -197,5 +201,32 @@ export interface ServerToClientEvents {
     playerId: string;
     sanity: number;
     delta: number;
+  }) => void;
+  'story:status': (data: {
+    phase: 'queued' | 'generating' | 'validating' | 'image' | 'ready' | 'failed';
+    message?: string;
+  }) => void;
+  'story:ready': (data: {
+    openingImageUrl: string | null;
+    world: {
+      title: string;
+      setting: string;
+      centralMystery: string;
+      openingNarration: string;
+      ambientTrack: string;
+      tone: string;
+    };
+    rooms: Array<{
+      id: string;
+      name: string;
+      exits: Record<string, string | null>;
+    }>;
+    npcs: Array<{ id: string; name: string; role: string }>;
+    evidenceItems: Array<{ id: string; name: string }>;
+  }) => void;
+  'story:image-ready': (data: {
+    kind: 'room' | 'npc';
+    id: string;
+    url: string;
   }) => void;
 }

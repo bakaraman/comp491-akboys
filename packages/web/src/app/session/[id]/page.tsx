@@ -20,6 +20,9 @@ import { CopyLinkButton } from '@/components/CopyLinkButton';
 import { CommPanel } from '@/components/CommPanel';
 import { EvidenceBoard } from '@/components/EvidenceBoard';
 import type { EvidenceItem, SuspectInfo } from '@/components/EvidenceBoard';
+import { LobbyScreen } from '@/components/LobbyScreen';
+import { FinaleCinematic } from '@/components/FinaleCinematic';
+import { T } from '@/lib/tr';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
@@ -895,8 +898,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /*  MULTIPLAYER RENDERS BELOW                                        */
   /* ================================================================ */
 
-  const emoji = SCENARIO_EMOJI[sessionInfo.scenarioId] || '\uD83D\uDCD6';
   const roomCode = sessionInfo.roomCode || '';
+  void SCENARIO_EMOJI; // kept for future re-use / emoji mapping
 
   /* ================================================================ */
   /*  RENDER: Joining / Name entry (pre-join)                          */
@@ -941,152 +944,25 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   /* ================================================================ */
-  /*  RENDER: Voting phase (scenario selection)                        */
+  /*  RENDER: Lobby phase (host types a prompt, AI generates world)   */
   /* ================================================================ */
-  if (mp.gameState === 'voting') {
+  if (mp.gameState === 'voting' || mp.gameState === 'lobby') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: '#0a0a0a', padding: '24px', overflowY: 'auto' }}>
-        <div style={{ textAlign: 'center', maxWidth: '760px', width: '100%', marginTop: '24px' }}>
-
-          {/* Room code header */}
-          <div style={{ marginBottom: '8px' }}>
-            <p style={{ fontSize: '10px', color: '#5a5545', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '6px' }}>Room Code</p>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px', padding: '10px 20px', backgroundColor: '#111', border: '1px solid #2a2520', borderRadius: '10px' }}>
-              <span style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: '5px', color: '#d4a843' }}>{roomCode}</span>
-              <button
-                onClick={() => { navigator.clipboard.writeText(roomCode); }}
-                title="Copy code"
-                style={{ background: 'none', border: 'none', color: '#5a5545', cursor: 'pointer', padding: '4px', transition: 'color 0.2s' }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#d4a843'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#5a5545'; }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Players bar */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '28px', flexWrap: 'wrap' }}>
-            {mp.players.map((p) => {
-              const isMe = p.id === mp.myPlayerId;
-              return (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', backgroundColor: '#111', borderRadius: '20px', border: `1px solid ${isMe ? '#3a3020' : '#1e1e1e'}` }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: p.color }} />
-                  <span style={{ fontSize: '12px', color: p.color, fontFamily: 'monospace' }}>
-                    {p.name}
-                    {isMe && <span style={{ color: '#5a5545', marginLeft: '4px' }}>(you)</span>}
-                    {p.id === mp.players[0]?.id && <span style={{ color: '#d4a843', marginLeft: '4px' }}>★</span>}
-                  </span>
-                </div>
-              );
-            })}
-            {/* Empty slots */}
-            {Array.from({ length: sessionInfo.maxPlayers - mp.players.length }).map((_, i) => (
-              <div key={`e-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', backgroundColor: '#0a0a0a', borderRadius: '20px', border: '1px dashed #1e1e1e' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#1e1e1e' }} />
-                <span style={{ fontSize: '12px', color: '#3a3530', fontFamily: 'monospace' }}>waiting...</span>
-              </div>
-            ))}
-          </div>
-
-          <h2 style={{ fontSize: '24px', color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: 'normal', marginBottom: '6px' }}>
-            {isHost ? 'Choose a Story' : 'Vote for a Story'}
-          </h2>
-          <p style={{ fontSize: '12px', color: '#5a5545', fontFamily: 'monospace', letterSpacing: '1px', marginBottom: '28px' }}>
-            {isHost ? 'Click to select, then start the adventure' : "Click to show your preference — the host decides"}
-          </p>
-
-          {/* Scenario grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '28px', textAlign: 'left' }}>
-            {scenarios.map((s) => {
-              const isHostSelected = mp.selectedScenarioId === s.id;
-              const voters = mp.scenarioVotes[s.id] || [];
-              const iVoted = voters.includes(myPlayer?.name || '');
-
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => isHost ? mp.selectScenario(s.id) : mp.voteScenario(s.id)}
-                  style={{
-                    padding: '20px', position: 'relative',
-                    backgroundColor: isHostSelected ? '#1a1510' : iVoted ? '#12150f' : '#111',
-                    border: `2px solid ${isHostSelected ? '#d4a843' : iVoted ? '#3a5a3a' : '#1a1a1a'}`,
-                    borderRadius: '12px', cursor: 'pointer',
-                    textAlign: 'left', transition: 'all 0.25s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isHostSelected) { e.currentTarget.style.borderColor = '#3a3020'; e.currentTarget.style.backgroundColor = '#151210'; }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isHostSelected && !iVoted) { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.backgroundColor = '#111'; }
-                    else if (iVoted && !isHostSelected) { e.currentTarget.style.borderColor = '#3a5a3a'; e.currentTarget.style.backgroundColor = '#12150f'; }
-                  }}
-                >
-                  {/* Host selection badge */}
-                  {isHostSelected && (
-                    <div style={{ position: 'absolute', top: '10px', right: '10px', padding: '2px 8px', backgroundColor: '#d4a843', borderRadius: '4px', fontSize: '9px', fontFamily: 'monospace', fontWeight: 'bold', color: '#0a0a0a', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                      HOST PICK
-                    </div>
-                  )}
-
-                  <div style={{ fontSize: '28px', marginBottom: '8px' }}>{SCENARIO_EMOJI[s.id] || '\uD83D\uDCD6'}</div>
-                  <div style={{ fontSize: '15px', color: isHostSelected ? '#d4a843' : '#b0a080', fontFamily: 'Georgia, serif', fontWeight: 'bold', marginBottom: '4px' }}>{s.title}</div>
-                  <div style={{ fontSize: '11px', color: '#5a5545', fontFamily: 'monospace', lineHeight: '1.5', marginBottom: voters.length > 0 ? '10px' : '0' }}>{s.setting}</div>
-
-                  {/* Voter badges */}
-                  {voters.length > 0 && (
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
-                      {voters.map((name) => {
-                        const voter = mp.players.find((p) => p.name === name);
-                        return (
-                          <span key={name} style={{ padding: '2px 8px', backgroundColor: '#1a1a1a', borderRadius: '10px', fontSize: '10px', color: voter?.color || '#6a6050', fontFamily: 'monospace', border: '1px solid #2a2520' }}>
-                            {name}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Start button (host) or waiting message (guest) */}
-          {isHost ? (
-            <button
-              onClick={handleStartGame}
-              disabled={!mp.selectedScenarioId || isStartingGame}
-              style={{
-                padding: '16px 48px',
-                backgroundColor: !mp.selectedScenarioId || isStartingGame ? '#1a1510' : '#d4a843',
-                color: !mp.selectedScenarioId || isStartingGame ? '#5a5040' : '#0a0a0a',
-                border: 'none', borderRadius: '8px', fontSize: '15px',
-                fontWeight: 'bold', fontFamily: 'monospace',
-                letterSpacing: '2px', textTransform: 'uppercase',
-                cursor: !mp.selectedScenarioId || isStartingGame ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              {isStartingGame ? 'Starting...' : 'Start Adventure'}
-            </button>
-          ) : (
-            <div style={{ padding: '16px', backgroundColor: '#0a0a0a', border: '1px solid #1e1e1e', borderRadius: '8px', display: 'inline-block' }}>
-              <p style={{ fontSize: '13px', color: '#6a6050', fontFamily: 'Georgia, serif', fontStyle: 'italic', margin: 0 }}>
-                {mp.selectedScenarioId
-                  ? `Host is considering: ${scenarios.find((s) => s.id === mp.selectedScenarioId)?.title || '...'}`
-                  : 'Waiting for host to choose a story...'}
-              </p>
-            </div>
-          )}
-
-          {mp.error && <p style={{ marginTop: '12px', fontSize: '13px', color: '#cf5b5b', fontFamily: 'monospace' }}>{mp.error}</p>}
-        </div>
-      </div>
+      <LobbyScreen
+        isHost={isHost}
+        roomCode={roomCode}
+        players={mp.players.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
+        myPlayerId={mp.myPlayerId}
+        maxPlayers={sessionInfo.maxPlayers}
+        onGenerateStory={(prompt) => mp.generateStory(prompt)}
+        storyStatus={mp.storyStatus}
+        storyReady={mp.worldMeta !== null}
+        onStartGame={handleStartGame}
+        isStartingGame={isStartingGame}
+      />
     );
   }
+
 
   /* ================================================================ */
   /*  RENDER: Multiplayer Game                                         */
@@ -1349,35 +1225,21 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         />
       )}
 
-      {/* Multiplayer Game Over Overlay (#25) */}
+      {/* Multiplayer Finale Cinematic (Velvet Shadow v2) */}
       {mp.gameOver && (
-        <div style={{
-          position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60,
-        }}>
-          <div style={{ textAlign: 'center', maxWidth: '520px', padding: '24px' }}>
-            <h1 style={{
-              color: mp.gameOver.status === 'won' ? '#d4a843' : '#d46868',
-              fontFamily: 'Georgia, serif',
-              fontStyle: 'italic',
-              fontSize: '44px',
-              marginBottom: '14px',
-            }}>
-              {mp.gameOver.status === 'won' ? 'Case Solved' : 'Case Lost'}
-            </h1>
-            <p style={{ color: '#9a9080', fontFamily: 'Georgia, serif', fontSize: '17px', lineHeight: '1.7', marginBottom: '28px' }}>
-              {mp.gameOver.summary}
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
-              <a
-                href="/"
-                style={{ padding: '12px 22px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '8px', color: '#b0a080', textDecoration: 'none', fontFamily: 'monospace', letterSpacing: '1px' }}
-              >
-                Home
-              </a>
-            </div>
-          </div>
-        </div>
+        <FinaleCinematic
+          sessionId={sessionId}
+          outcome={
+            mp.gameOver.endReason === 'solved'
+              ? 'won'
+              : mp.gameOver.endReason === 'wrong_accusation'
+              ? 'lost_wrong'
+              : 'lost_timeout'
+          }
+          summary={mp.gameOver.summary}
+          onHome={() => { window.location.href = '/'; }}
+          onPlayAgain={() => { window.location.href = '/multiplayer'; }}
+        />
       )}
 
       <style>{`

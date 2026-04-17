@@ -15,6 +15,7 @@ import { AuthGuard } from '@/components/AuthGuard';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { ProfileButton } from '@/components/ProfileButton';
 import { getAuthHeaders } from '@/lib/firebase';
+import { T } from '@/lib/tr';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
@@ -48,11 +49,11 @@ export default function MultiplayerPage() {
       if (data.sessionId) {
         router.push(`/session/${data.sessionId}`);
       } else {
-        setError('Failed to create room');
+        setError(T.errors.generic);
         setIsLoading(false);
       }
     } catch {
-      setError('Could not connect to server');
+      setError(T.errors.networkError);
       setIsLoading(false);
     }
   }
@@ -68,7 +69,7 @@ export default function MultiplayerPage() {
         headers: await getAuthHeaders(),
       });
       if (!res.ok) {
-        setError('Room not found. Check the code and try again.');
+        setError(T.multiplayer.noRoom);
         setIsLoading(false);
         return;
       }
@@ -77,7 +78,7 @@ export default function MultiplayerPage() {
         router.push(`/session/${data.sessionId}`);
       }
     } catch {
-      setError('Could not connect to server');
+      setError(T.errors.networkError);
       setIsLoading(false);
     }
   }
@@ -108,20 +109,20 @@ export default function MultiplayerPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
           </svg>
-          BACK
+          {T.multiplayer.back}
         </button>
 
         <h1 style={{
           fontSize: '28px', color: '#d4a843', fontFamily: 'Georgia, serif',
           fontStyle: 'italic', fontWeight: 'normal', marginBottom: '8px',
         }}>
-          Multiplayer
+          {T.multiplayer.pageTitle}
         </h1>
         <p style={{
           fontSize: '12px', color: '#5a5545', fontFamily: 'monospace',
           letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '36px',
         }}>
-          Play with friends
+          {T.app.tagline}
         </p>
 
         {/* ---- Choice screen ---- */}
@@ -160,13 +161,13 @@ export default function MultiplayerPage() {
                 fontFamily: 'Georgia, serif', fontWeight: 'bold',
                 marginBottom: '6px',
               }}>
-                Host Game
+                {T.multiplayer.hostCard}
               </div>
               <div style={{
                 fontSize: '11px', color: '#5a5545',
                 fontFamily: 'monospace', lineHeight: '1.5',
               }}>
-                Create a room and invite friends
+                {T.multiplayer.hostDesc}
               </div>
             </button>
 
@@ -203,13 +204,13 @@ export default function MultiplayerPage() {
                 fontFamily: 'Georgia, serif', fontWeight: 'bold',
                 marginBottom: '6px',
               }}>
-                Join Room
+                {T.multiplayer.joinCard}
               </div>
               <div style={{
                 fontSize: '11px', color: '#5a5545',
                 fontFamily: 'monospace', lineHeight: '1.5',
               }}>
-                Enter a room code to join
+                {T.multiplayer.joinDesc}
               </div>
             </button>
           </div>
@@ -226,7 +227,7 @@ export default function MultiplayerPage() {
               fontFamily: 'Georgia, serif', lineHeight: '1.6',
               marginBottom: '20px', textAlign: 'center',
             }}>
-              Create a new session. Share the room code with your friends — up to ten detectives can join.
+              {T.multiplayer.hostBlurb}
             </p>
 
             <button
@@ -243,7 +244,7 @@ export default function MultiplayerPage() {
                 transition: 'all 0.2s',
               }}
             >
-              {isLoading ? 'Creating...' : 'Create Room'}
+              {isLoading ? T.multiplayer.creating : T.multiplayer.create}
             </button>
           </div>
         )}

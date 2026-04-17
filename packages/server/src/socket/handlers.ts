@@ -38,6 +38,13 @@ import {
   validateDirective,
 } from './prompt-builder.js';
 import { narratorChatStream, narratorStructuredResponse, suggestFollowUps } from '../middleware/openai.js';
+import {
+  getScenarioForSession,
+  generateWorld,
+  generateOpeningImage,
+  generateAllRoomImages,
+  generateAllNpcPortraits,
+} from '../world/index.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -113,6 +120,16 @@ function findSocketsInRoom(store: SessionStore, sessionId: string, roomId: strin
 /*  #25: Accusation vote resolution helper                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Resolve an accusation vote.
+ *
+ * Rules (Velvet Shadow v2):
+ *   - Unanimity required: EVERY connected player must vote "guilty" for accusation to proceed.
+ *   - Any "not_guilty" OR missing vote (timeout) → accusation rejected, game CONTINUES.
+ *   - Unanimous "guilty" → backend checks correctness:
+ *       * Correct culprit + correct evidence + all required evidence collected → WIN
+ *       * Anything else → INSTANT LOSS (one shot rule)
+ */
 function resolveAccusationVote(io: GameServer, store: SessionStore, sessionId: string): void {
   const session = store.get(sessionId);
   if (!session || !session.activeAccusation) return;
@@ -126,79 +143,78 @@ function resolveAccusationVote(io: GameServer, store: SessionStore, sessionId: s
     accusationTimers.delete(sessionId);
   }
 
-  // Tally votes
-  let guiltyCount = 0;
-  let notGuiltyCount = 0;
   const voteRecord: Record<string, 'guilty' | 'not_guilty'> = {};
+  for (const [pid, vote] of accusation.votes) voteRecord[pid] = vote;
 
-  for (const [pid, vote] of accusation.votes) {
-    voteRecord[pid] = vote;
-    if (vote === 'guilty') guiltyCount++;
-    else notGuiltyCount++;
-  }
+  const connectedPlayers = Array.from(session.players.values()).filter((p) => p.isConnected);
+  const allVoted = connectedPlayers.every((p) => accusation.votes.has(p.id));
+  const unanimousGuilty = allVoted && connectedPlayers.every((p) => accusation.votes.get(p.id) === 'guilty');
 
-  const result: 'guilty' | 'not_guilty' = guiltyCount > notGuiltyCount ? 'guilty' : 'not_guilty';
+  // Clear active accusation first (no matter the outcome)
+  session.activeAccusation = null;
 
-  if (result === 'guilty') {
-    // Check if accusation is correct
-    const scenario = SCENARIOS[session.scenarioId];
-    if (!scenario) return;
-
-    const isCorrectSuspect = accusation.suspectId === scenario.solution.culpritId;
-
-    // Check if team has found all required evidence (combined inventories + discovered)
-    const teamInventory = new Set<string>();
-    for (const p of session.players.values()) {
-      for (const item of p.inventory) teamInventory.add(item);
-    }
-    for (const eid of session.gameState.discoveredEvidence) {
-      teamInventory.add(eid);
-    }
-
-    const hasAllEvidence = scenario.solution.requiredEvidenceIds.every(
-      id => teamInventory.has(id),
-    );
-
-    const isCorrect = isCorrectSuspect && hasAllEvidence;
-
-    io.to(sessionId).emit('accusation:vote-result', {
-      result: 'guilty',
-      votes: voteRecord,
-      isCorrect,
-      summary: isCorrect
-        ? `The team correctly identified ${accusation.suspectName} as the culprit!`
-        : `The team accused ${accusation.suspectName}, but the case was not proven.`,
-    });
-
-    // End game
-    session.state = 'ended';
-    store.updateGameState(sessionId, {
-      isGameOver: true,
-      status: isCorrect ? 'won' : 'lost',
-      endReason: isCorrect ? 'solved' : 'wrong_accusation',
-    });
-
-    io.to(sessionId).emit('session:gameover', {
-      status: isCorrect ? 'won' : 'lost',
-      endReason: isCorrect ? 'solved' : 'wrong_accusation',
-      summary: isCorrect
-        ? `Congratulations! ${accusation.suspectName} was indeed the culprit. Case closed.`
-        : `Wrong accusation! ${accusation.suspectName} was not the culprit. The real criminal escapes.`,
-    });
-  } else {
-    // Not guilty — game continues
+  if (!unanimousGuilty) {
+    // REJECTED — game continues
     io.to(sessionId).emit('accusation:vote-result', {
       result: 'not_guilty',
       votes: voteRecord,
-      summary: 'The team voted not guilty. The investigation continues.',
+      summary: allVoted
+        ? `Takım hemfikir olamadı. Soruşturma devam ediyor.`
+        : `Oylama zamanında tamamlanmadı. Soruşturma devam ediyor.`,
     });
+    void store.sync(sessionId);
+    console.log(`[accusation] rejected for ${sessionId.slice(0, 8)} (unanimous=${unanimousGuilty})`);
+    return;
   }
 
-  // Clear active accusation
-  session.activeAccusation = null;
-  void store.sync(sessionId);
+  // UNANIMOUS GUILTY — now check correctness
+  const scenario = getScenarioForSession(session);
+  if (!scenario) return;
 
-  console.log(`[accusation] vote resolved for session ${sessionId.slice(0, 8)}: ${result} (${guiltyCount} guilty, ${notGuiltyCount} not guilty)`);
+  const isCorrectSuspect = accusation.suspectId === scenario.solution.culpritId;
+
+  // Team must have all required evidence (inventory OR discoveredEvidence)
+  const teamEvidence = new Set<string>();
+  for (const p of session.players.values()) {
+    for (const itemId of p.inventory) teamEvidence.add(itemId);
+  }
+  for (const eid of session.gameState.discoveredEvidence) teamEvidence.add(eid);
+  const hasAllEvidence = scenario.solution.requiredEvidenceIds.every((id) => teamEvidence.has(id));
+
+  const isCorrect = isCorrectSuspect && hasAllEvidence;
+
+  const roomSockets = io.sockets.adapter.rooms.get(sessionId);
+  console.log(`[accusation] emitting vote-result+gameover to room ${sessionId.slice(0, 8)}: ${roomSockets?.size ?? 0} sockets`);
+
+  // End game — win if correct, instant loss if wrong (state change first)
+  session.state = 'ended';
+  store.updateGameState(sessionId, {
+    isGameOver: true,
+    status: isCorrect ? 'won' : 'lost',
+    endReason: isCorrect ? 'solved' : 'wrong_accusation',
+  });
+
+  // Emit GAMEOVER FIRST (the outcome the UI most cares about)
+  io.to(sessionId).emit('session:gameover', {
+    status: isCorrect ? 'won' : 'lost',
+    endReason: isCorrect ? 'solved' : 'wrong_accusation',
+    summary: isCorrect
+      ? `Dava kapandı. ${accusation.suspectName} gerçekten katildi.`
+      : `${accusation.suspectName} katil değildi. Gerçek katil kaçtı.`,
+  });
+
+  // Then vote-result for UI ribbon / transition cue
+  io.to(sessionId).emit('accusation:vote-result', {
+    result: 'guilty',
+    votes: voteRecord,
+    isCorrect,
+    summary: isCorrect
+      ? `Takım oybirliğiyle ${accusation.suspectName}'i suçladı. Kanıtlar yerinde.`
+      : `Takım oybirliğiyle ${accusation.suspectName}'i suçladı. Ama kanıtlar tutmadı.`,
+  });
+
+  void store.sync(sessionId);
+  console.log(`[accusation] resolved ${sessionId.slice(0, 8)}: ${isCorrect ? 'WON' : 'LOST'} (suspect=${accusation.suspectName})`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -243,7 +259,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     const session = store.get(sessionId);
     if (!session) return;
 
-    const scenario = SCENARIOS[session.scenarioId];
+    const scenario = getScenarioForSession(session);
     if (!scenario) return;
 
     session.isStreaming = true;
@@ -265,10 +281,19 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         playerName: action.playerName,
         timestamp: Date.now(),
         messageType: 'action',
-        visibleTo: [action.playerId],
+        // Velvet Shadow v2: actor's typed action is also visible to same-room witnesses.
+        visibleTo: [
+          action.playerId,
+          ...Array.from(session.players.values())
+            .filter((p) => p.id !== action.playerId && p.currentRoomId === action.roomId && p.isConnected)
+            .map((p) => p.id),
+        ],
       });
 
       const actorSockets = findSocketsForPlayer(action.playerId);
+      // Same-room witness sockets receive narrator chunks in real time too.
+      const roomWitnessSockets = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
+      const streamFanoutSockets = new Set<string>([...actorSockets, ...roomWitnessSockets]);
 
       // Primary: structured JSON response (no streaming, but guaranteed schema)
       // Fallback: streaming text response with legacy parsing
@@ -285,8 +310,8 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         observedLine = parsed.observedLine;
         directives = parsed.directives;
 
-        // Emit the completed response immediately (no streaming for structured)
-        for (const sid of actorSockets) {
+        // Emit the completed response to actor + same-room witnesses
+        for (const sid of streamFanoutSockets) {
           io.to(sid).emit('narrator:chunk', {
             content: privateResponse,
             fullText: privateResponse,
@@ -303,7 +328,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         try {
           for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
             fullText += chunk;
-            for (const sid of actorSockets) {
+            for (const sid of streamFanoutSockets) {
               io.to(sid).emit('narrator:chunk', {
                 content: chunk,
                 fullText,
@@ -591,7 +616,18 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         }
       }
 
-      // Store private response in history (scoped to actor)
+      // Velvet Shadow v2: same-room players share the FULL narrator response
+      // (observed summaries removed — every player in this room sees what the
+      // actor did and what the narrator said, as if they were there together).
+      const witnessIds: string[] = [];
+      for (const p of session.players.values()) {
+        if (p.currentRoomId === action.roomId && p.isConnected && p.id !== action.playerId) {
+          witnessIds.push(p.id);
+        }
+      }
+      const audienceIds = [action.playerId, ...witnessIds];
+
+      // Store the full response once, visible to actor + same-room witnesses
       store.addMessage(sessionId, {
         role: 'assistant',
         content: privateResponse,
@@ -599,55 +635,34 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         playerName: action.playerName,
         timestamp: Date.now(),
         messageType: 'private',
-        visibleTo: [action.playerId],
+        visibleTo: audienceIds,
       });
 
-      // Generate scoped suggestions from private response only
+      // Generate scoped suggestions for the actor (witnesses don't get suggestions —
+      // they read along but don't take actions on behalf of the actor).
       let suggestions: string[];
       try {
         suggestions = await suggestFollowUps(privateResponse);
       } catch {
-        suggestions = ['Look around', 'Talk to someone', 'Move to another room'];
+        suggestions = ['Etrafına bak', 'Biriyle konuş', 'Başka odaya git'];
       }
 
-      // Send narrator:done to actor only
-      for (const sid of actorSockets) {
+      // Send narrator:done to the actor AND to same-room witnesses.
+      // Witnesses see the full text but with the actor's name attached so the UI
+      // can visually mark "this was X's action" in the shared stream.
+      const witnessSocketIds = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
+      const fanoutSocketIds = new Set<string>([...actorSockets, ...witnessSocketIds]);
+      for (const sid of fanoutSocketIds) {
         io.to(sid).emit('narrator:done', {
           fullText: privateResponse,
-          suggestions,
+          suggestions: actorSockets.includes(sid) ? suggestions : [],
           targetPlayerId: action.playerId,
         });
       }
 
-      // Compute observed audience snapshot (same-room witnesses at this moment)
-      const witnessIds: string[] = [];
-      for (const p of session.players.values()) {
-        if (p.currentRoomId === action.roomId && p.isConnected && p.id !== action.playerId) {
-          witnessIds.push(p.id);
-        }
-      }
-
-      // Store observed in history with audience snapshot
-      if (witnessIds.length > 0) {
-        store.addMessage(sessionId, {
-          role: 'assistant',
-          content: observedLine,
-          playerName: action.playerName,
-          timestamp: Date.now(),
-          messageType: 'observed',
-          visibleTo: witnessIds,
-        });
-      }
-
-      // Send observed to same-room witnesses
-      const witnessSockets = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
-      for (const sid of witnessSockets) {
-        io.to(sid).emit('narrator:observed', {
-          text: observedLine,
-          actorName: action.playerName,
-          roomId: action.roomId,
-        });
-      }
+      // No observed-summary emit anymore — removed in Velvet Shadow v2.
+      // observedLine is unused; we leave parser compatibility but ignore output.
+      void observedLine;
 
       void store.sync(sessionId);
 
@@ -719,7 +734,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         return;
       }
 
-      const scenario = SCENARIOS[session.scenarioId];
+      const scenario = getScenarioForSession(session);
       const startRoom = scenario?.rooms[0]?.id || 'start';
 
       const playerId = uuidv4();
@@ -747,7 +762,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       io.to(sessionId).emit('player:joined', { player: toPlayerDTO(player), allPlayers });
 
       // Send filtered session state to the joining player (server-side visibility)
-      const joinScenario = SCENARIOS[session.scenarioId];
+      const joinScenario = getScenarioForSession(session);
       socket.emit('session:state', {
         session: {
           id: session.id,
@@ -1067,25 +1082,137 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /*  GAME START                                                      */
     /* ================================================================ */
 
+    /* ================================================================ */
+    /*  STORY:GENERATE — procedural world generation (Velvet Shadow v2) */
+    /* ================================================================ */
+
+    socket.on('story:generate', async (data, callback) => {
+      const { sessionId, playerId, hostPrompt } = data;
+
+      const session = store.get(sessionId);
+      if (!session) { callback({ success: false, error: 'Session not found' }); return; }
+      if (session.state === 'playing') { callback({ success: false, error: 'Game already started' }); return; }
+      if (session.world) { callback({ success: false, error: 'Story already generated' }); return; }
+      if (session.players.size < 1) { callback({ success: false, error: 'Need at least one player' }); return; }
+
+      const firstPlayer = Array.from(session.players.values())[0];
+      if (firstPlayer.id !== playerId) { callback({ success: false, error: 'Only the host can generate the story' }); return; }
+
+      callback({ success: true });
+      store.setHostPrompt(sessionId, hostPrompt);
+      io.to(sessionId).emit('story:status', { phase: 'queued' });
+
+      try {
+        io.to(sessionId).emit('story:status', { phase: 'generating', message: 'Hikaye yazılıyor...' });
+        const playerCount = session.players.size;
+        const result = await generateWorld({ hostPrompt, playerCount });
+        store.setWorld(sessionId, result.world);
+        console.log(`[story:generate] world ready for ${sessionId.slice(0, 8)} (fallback=${result.usedFallback})`);
+
+        // Also set scenarioId to our synthetic marker so downstream code knows.
+        const sess = store.get(sessionId);
+        if (sess) sess.scenarioId = '__generated';
+        void store.sync(sessionId);
+
+        io.to(sessionId).emit('story:status', { phase: 'image', message: 'Açılış görseli oluşturuluyor...' });
+        const openingUrl = await generateOpeningImage(result.world);
+        store.setOpeningImage(sessionId, openingUrl);
+
+        // Assign players to entry scenes
+        const freshSession = store.get(sessionId);
+        if (freshSession) {
+          const entries = result.world.entryScenes;
+          const players = Array.from(freshSession.players.values());
+          players.forEach((p, i) => {
+            const entry = entries[i % entries.length];
+            store.updatePlayer(sessionId, p.id, {
+              currentRoomId: entry.roomId,
+              visitedRooms: [entry.roomId],
+            });
+          });
+        }
+
+        // Broadcast "story ready" with all the world metadata
+        const rooms = result.world.rooms.map((r) => ({
+          id: r.id,
+          name: r.name,
+          exits: r.exits as Record<string, string | null>,
+        }));
+        const npcs = result.world.npcs.map((n) => ({
+          id: n.id,
+          name: n.name,
+          role: n.role,
+        }));
+        const evidenceItems = result.world.items
+          .filter((i) => i.isEvidence)
+          .map((i) => ({ id: i.id, name: i.name }));
+
+        io.to(sessionId).emit('story:ready', {
+          openingImageUrl: openingUrl,
+          world: {
+            title: result.world.meta.title,
+            setting: result.world.meta.setting,
+            centralMystery: result.world.meta.centralMystery,
+            openingNarration: result.world.openingNarration,
+            ambientTrack: result.world.meta.ambientTrack,
+            tone: result.world.meta.tone,
+          },
+          rooms,
+          npcs,
+          evidenceItems,
+        });
+
+        store.markOpeningReady(sessionId);
+
+        // Kick off async room + NPC image generation (non-blocking)
+        void generateAllRoomImages(result.world, (res) => {
+          if (res.url) {
+            store.setRoomImage(sessionId, res.roomId, res.url);
+            io.to(sessionId).emit('story:image-ready', {
+              kind: 'room',
+              id: res.roomId,
+              url: res.url,
+            });
+          }
+        });
+        void generateAllNpcPortraits(result.world, (res) => {
+          if (res.url) {
+            store.setNpcPortrait(sessionId, res.npcId, res.url);
+            io.to(sessionId).emit('story:image-ready', {
+              kind: 'npc',
+              id: res.npcId,
+              url: res.url,
+            });
+          }
+        });
+      } catch (err) {
+        console.error(`[story:generate] failed:`, err);
+        io.to(sessionId).emit('story:status', {
+          phase: 'failed',
+          message: (err as Error).message || 'Hikaye oluşturulamadı',
+        });
+      }
+    });
+
     socket.on('game:start', async (data, callback) => {
       const { sessionId, playerId } = data;
 
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
       if (session.state === 'playing') { callback({ success: false, error: 'Game already started' }); return; }
-      if (session.scenarioId === '__pending') { callback({ success: false, error: 'Please select a scenario first' }); return; }
+      if (!session.world) { callback({ success: false, error: 'Story not generated yet' }); return; }
       if (session.players.size < 1) { callback({ success: false, error: 'Need at least one player' }); return; }
 
       const firstPlayer = Array.from(session.players.values())[0];
       if (firstPlayer.id !== playerId) { callback({ success: false, error: 'Only the host can start the game' }); return; }
 
       session.state = 'playing';
-      session.mpTurnCount = 0; // #25: reset turn counter
+      session.mpTurnCount = 0;
 
-      const scenario = SCENARIOS[session.scenarioId];
+      const scenario = getScenarioForSession(session);
       if (!scenario) { callback({ success: false, error: 'Unknown scenario' }); return; }
 
-      // #19: Initialize NPC states from scenario
+      // Initialize NPC states from scenario rooms
       for (const npc of scenario.npcs) {
         session.npcStates.set(npc.id, {
           id: npc.id,
@@ -1102,52 +1229,44 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const allPlayers = getAllPlayerDTOs(store, sessionId);
       io.to(sessionId).emit('game:started', { sessionId, scenarioTitle: scenario.title, players: allPlayers });
 
-      // Opening narration — goes to all players (not scoped)
-      const systemPrompt = buildOpeningPrompt(scenario, session);
-      const playerNames = Array.from(session.players.values()).map((p) => p.name);
-      const startMsg = `Start the game. The players are: ${playerNames.join(', ')}. Describe the scene and welcome them.`;
+      // Emit per-player entry scene narration as the opening.
+      // Each player gets ONE narrator chunk that is scoped to them (their entry hook).
+      const world = session.world;
+      const entries = world.entryScenes;
+      const playerList = Array.from(session.players.values());
+      for (let i = 0; i < playerList.length; i++) {
+        const p = playerList[i];
+        const entry = entries[i % entries.length];
+        const hook = entry.narrativeHook;
 
-      store.addMessage(sessionId, { role: 'user', content: startMsg, timestamp: Date.now() });
+        // Store as a private message visible only to this player
+        store.addMessage(sessionId, {
+          role: 'assistant',
+          content: hook,
+          playerId: p.id,
+          playerName: p.name,
+          timestamp: Date.now(),
+          messageType: 'private',
+          visibleTo: [p.id],
+        });
 
-      session.isStreaming = true;
-      let fullText = '';
-
-      try {
-        for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
-          fullText += chunk;
-          io.to(sessionId).emit('narrator:chunk', { content: chunk, fullText });
+        // Find all sockets for this player — emit narrator:done directly
+        const actorSocketIds = findSocketsForPlayer(p.id);
+        for (const sid of actorSocketIds) {
+          io.to(sid).emit('narrator:chunk', {
+            content: hook,
+            fullText: hook,
+            targetPlayerId: p.id,
+          });
+          io.to(sid).emit('narrator:done', {
+            fullText: hook,
+            suggestions: ['Etrafına bak', 'Odayı incele', 'İleri git'],
+            targetPlayerId: p.id,
+          });
         }
-      } catch (err) {
-        console.error(`[game:start] OpenAI error:`, err);
-        fullText = fullText || '*The narrator clears their throat and begins...*';
       }
 
-      const { moves, pickups, cleanText } = parseStateChanges(fullText);
-
-      for (const move of moves) {
-        const p = Array.from(session.players.values()).find((pl) => pl.name === move.playerName);
-        if (p) {
-          store.updatePlayer(sessionId, p.id, { currentRoomId: move.roomId });
-          if (!p.visitedRooms.includes(move.roomId)) p.visitedRooms.push(move.roomId);
-        }
-      }
-
-      for (const pickup of pickups) {
-        const p = Array.from(session.players.values()).find((pl) => pl.name === pickup.playerName);
-        if (p && !p.inventory.includes(pickup.itemId)) p.inventory.push(pickup.itemId);
-      }
-
-      store.addMessage(sessionId, { role: 'assistant', content: cleanText, timestamp: Date.now() });
-
-      let suggestions: string[];
-      try { suggestions = await suggestFollowUps(cleanText); }
-      catch { suggestions = ['Look around', 'Talk to someone', 'Move to another room']; }
-
-      io.to(sessionId).emit('narrator:done', { fullText: cleanText, suggestions });
-      session.isStreaming = false;
-      void store.sync(sessionId);
-
-      console.log(`[game:start] opening narration complete for session ${sessionId.slice(0, 8)}`);
+      console.log(`[game:start] per-player entry scenes delivered for ${sessionId.slice(0, 8)}`);
     });
 
     /* ================================================================ */
@@ -1164,14 +1283,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const player = store.getPlayer(sessionId, playerId);
       if (!player) { callback({ success: false, error: 'Player not found' }); return; }
 
-      // #18: Only detective role can propose (if roles are in use)
-      const rolesInUse = Array.from(session.players.values()).some(p => p.role);
-      if (rolesInUse && player.role !== 'detective') {
-        callback({ success: false, error: 'Only the Detective can propose accusations' });
-        return;
-      }
-
-      const scenario = SCENARIOS[session.scenarioId];
+      const scenario = getScenarioForSession(session);
       if (!scenario) { callback({ success: false, error: 'Scenario not found' }); return; }
 
       const suspect = scenario.npcs.find(n => n.id === suspectId);
@@ -1251,7 +1363,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       socketMap.set(socket.id, { sessionId, playerId });
       socket.join(sessionId);
 
-      const scenario = SCENARIOS[session.scenarioId];
+      const scenario = getScenarioForSession(session);
       const allPlayers = getAllPlayerDTOs(store, sessionId);
 
       socket.emit('session:state', {

@@ -17,6 +17,7 @@ import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
 import { ProfileButton } from '@/components/ProfileButton';
 import { authEnabled, signOutUser } from '@/lib/firebase';
+import { T } from '@/lib/tr';
 
 export default function HomePage() {
   const router = useRouter();
@@ -65,7 +66,7 @@ export default function HomePage() {
             textTransform: 'uppercase',
           }}
         >
-          Sign out
+          {T.home.signOut}
         </button>
       )}
 
@@ -86,14 +87,14 @@ export default function HomePage() {
           fontWeight: 'normal', marginBottom: '8px',
           letterSpacing: '-0.5px',
         }}>
-          The Velvet Shadow
+          {T.app.title}
         </h1>
         <p style={{
           fontSize: '13px', color: '#5a5545',
           fontFamily: 'monospace', letterSpacing: '3px',
           textTransform: 'uppercase', marginBottom: '48px',
         }}>
-          AI-Powered Text Adventure
+          {T.app.subtitle}
         </p>
 
         {/* Start game — multiplayer only */}
@@ -134,13 +135,13 @@ export default function HomePage() {
               fontFamily: 'Georgia, serif', fontWeight: 'bold',
               marginBottom: '8px',
             }}>
-              Start a Session
+              {T.home.startSession}
             </div>
             <div style={{
               fontSize: '12px', color: '#5a5545',
               fontFamily: 'monospace', lineHeight: '1.5',
             }}>
-              Play with 2-5 detectives in real-time
+              {T.home.startHint}
             </div>
           </button>
         </div>
@@ -149,7 +150,7 @@ export default function HomePage() {
           fontSize: '11px', color: '#2a2520',
           fontFamily: 'monospace',
         }}>
-          COMP 491 — AKBOYS — Spring 2026
+          {T.home.courseNote}
         </p>
       </div>
     </div>

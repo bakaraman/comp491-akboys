@@ -27,6 +27,16 @@ import {
   generateRoomCode,
 } from '../store/SessionStore.js';
 import { toPlayerDTO } from '@akboys/shared';
+import {
+  getScenarioForSession,
+  generateWorld,
+  generateOpeningImage,
+  generateAllRoomImages,
+  generateAllNpcPortraits,
+  streamTts,
+  streamFinale,
+  type FinaleOutcome,
+} from '../world/index.js';
 
 export const chatRouter = Router();
 
@@ -193,7 +203,7 @@ chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: 
     return;
   }
 
-  const scenario = SCENARIOS[session.scenarioId];
+  const scenario = getScenarioForSession(session);
   console.log(`${DEBUG_PREFIX} session:get`, {
     sessionId: session.id,
     historyLength: session.history.length,
@@ -258,7 +268,7 @@ chatRouter.get('/room/:code', requireAuth, (req: Request<{ code: string }>, res:
     res.status(404).json({ error: 'Room not found' });
     return;
   }
-  const scenario = SCENARIOS[session.scenarioId];
+  const scenario = getScenarioForSession(session);
   res.json({
     sessionId: session.id,
     scenarioId: session.scenarioId,
@@ -291,7 +301,7 @@ chatRouter.post('/', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const scenario = SCENARIOS[session.scenarioId];
+    const scenario = getScenarioForSession(session);
     if (!scenario) {
       res.status(400).json({ error: 'Unknown scenario' });
       return;
@@ -360,7 +370,7 @@ chatRouter.post('/image', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const scenario = SCENARIOS[session.scenarioId];
+    const scenario = getScenarioForSession(session);
     if (!scenario) {
       res.status(400).json({ error: 'Unknown scenario' });
       return;
@@ -470,7 +480,7 @@ chatRouter.post('/accuse', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const scenario = SCENARIOS[session.scenarioId];
+    const scenario = getScenarioForSession(session);
     if (!scenario) {
       res.status(400).json({ error: 'Unknown scenario' });
       return;
@@ -537,7 +547,7 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const scenario = SCENARIOS[session.scenarioId];
+    const scenario = getScenarioForSession(session);
     if (!scenario) {
       res.status(400).json({ error: 'Unknown scenario' });
       return;
@@ -554,5 +564,101 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to start game' });
     }
+  }
+});
+
+/* ================================================================== */
+/*  POST /api/chat/tts — stream TTS audio for arbitrary Turkish text  */
+/* ================================================================== */
+chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { text, voice } = req.body as { text?: string; voice?: string };
+    if (!text || typeof text !== 'string' || text.length < 2) {
+      res.status(400).json({ error: 'text is required' });
+      return;
+    }
+    const ttsRes = await streamTts({
+      text,
+      voice: (voice as 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined) ?? 'shimmer',
+      format: 'wav',
+    });
+
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    if (!ttsRes.body) {
+      const buf = Buffer.from(await ttsRes.arrayBuffer());
+      res.send(buf);
+      return;
+    }
+
+    const reader = (ttsRes.body as ReadableStream<Uint8Array>).getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) res.write(Buffer.from(value));
+      }
+      res.end();
+    } catch (err) {
+      console.error(`${DEBUG_PREFIX} tts stream error`, err);
+      try { res.end(); } catch { /* */ }
+    }
+  } catch (err) {
+    console.error(`${DEBUG_PREFIX} tts error`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'TTS failed' });
+  }
+});
+
+/* ================================================================== */
+/*  POST /api/chat/finale — SSE stream of AI-generated finale         */
+/* ================================================================== */
+chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { sessionId, outcome } = req.body as {
+      sessionId?: string;
+      outcome?: FinaleOutcome;
+    };
+    if (!sessionId || !outcome) {
+      res.status(400).json({ error: 'sessionId and outcome required' });
+      return;
+    }
+    const session = store.get(sessionId);
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
+    if (!session.world) { res.status(400).json({ error: 'No generated world for this session' }); return; }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const accusation = session.activeAccusation;
+    const playerNames = Array.from(session.players.values()).map((p) => p.name).join(', ');
+    let fullText = '';
+    try {
+      for await (const chunk of streamFinale({
+        world: session.world,
+        outcome,
+        accuserName: accusation?.proposerName,
+        accusedNpcId: outcome === 'won' ? session.world.solution.culpritNpcId : accusation?.suspectId,
+        wrongAccusedNpcId: outcome === 'lost_wrong' ? accusation?.suspectId : undefined,
+        evidencePresentedId: session.world.solution.keyEvidenceId,
+        worldStateLog: session.worldStateLog,
+        turnCount: session.mpTurnCount,
+        maxTurns: 40,
+      })) {
+        fullText += chunk;
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, whatReallyHappened: session.world.whatReallyHappened, players: playerNames })}\n\n`);
+      res.end();
+    } catch (err) {
+      console.error(`${DEBUG_PREFIX} finale stream error`, err);
+      try { res.end(); } catch { /* */ }
+    }
+  } catch (err) {
+    console.error(`${DEBUG_PREFIX} finale error`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'Finale failed' });
   }
 });
