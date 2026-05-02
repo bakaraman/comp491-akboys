@@ -402,6 +402,43 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
+      {/* Pinned opening narration — always visible above the chat */}
+      {mp.worldMeta?.openingNarration && (
+        <div
+          style={{
+            padding: '16px 24px',
+            borderBottom: '1px solid #2a2520',
+            backgroundColor: '#0d0d0d',
+            flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              fontSize: '10px',
+              color: '#5a5545',
+              fontFamily: 'monospace',
+              letterSpacing: '2px',
+              textTransform: 'uppercase',
+              marginBottom: '6px',
+            }}
+          >
+            Hikaye · {mp.worldMeta.title}
+          </div>
+          <div
+            style={{
+              color: '#b0a080',
+              fontFamily: 'Georgia, serif',
+              fontStyle: 'italic',
+              fontSize: '13px',
+              lineHeight: '1.7',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {mp.worldMeta.openingNarration}
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {mp.messages.map((msg) => (

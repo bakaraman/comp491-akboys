@@ -169,28 +169,6 @@ export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSi
                   </div>
                 </div>
 
-                {/* Room info */}
-                <div style={{
-                  padding: '8px 12px',
-                  backgroundColor: '#0a0a0a',
-                  borderRadius: '6px',
-                  marginBottom: '8px',
-                }}>
-                  <div style={{
-                    fontSize: '9px', color: '#5a5545',
-                    fontFamily: 'monospace', textTransform: 'uppercase',
-                    letterSpacing: '1.5px', marginBottom: '4px',
-                  }}>
-                    Location
-                  </div>
-                  <div style={{
-                    fontSize: '13px', color: '#9a9080',
-                    fontFamily: 'Georgia, serif', fontStyle: 'italic',
-                  }}>
-                    {player.currentRoomId}
-                  </div>
-                </div>
-
               </div>
             );
           })}
