@@ -17,7 +17,7 @@ export const NOIR_SCENARIO: Scenario = {
     'A jazz singer has gone missing from The Velvet Lounge. ' +
     'You are a private detective hired to find her. ' +
     'The rain never stops, the whiskey is cheap, and everyone has something to hide.',
-  maxTurns: 12,
+  maxTurns: 40,
   solution: {
     culpritId: 'bartender',
     evidenceId: 'matchbook',

@@ -121,6 +121,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   } | null>(null);
   const [roomImages, setRoomImages] = useState<Record<string, string>>({});
   const [npcPortraits, setNpcPortraits] = useState<Record<string, string>>({});
+  const [turnInfo, setTurnInfo] = useState<{ turnCount: number; maxTurns: number } | null>(null);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -289,6 +290,10 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
       if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
       if (session.commHistory) setCommMessages(session.commHistory);
+      // C.4: turn counter from session state (reload sync)
+      if (typeof session.turnCount === 'number' && typeof session.maxTurns === 'number') {
+        setTurnInfo({ turnCount: session.turnCount, maxTurns: session.maxTurns });
+      }
 
       // Rebuild message history — server already filtered for this player
       const restored: DisplayMessage[] = session.history.map((m, i) => ({
@@ -389,6 +394,11 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       } else if (data.kind === 'npc') {
         setNpcPortraits((prev) => ({ ...prev, [data.id]: data.url }));
       }
+    });
+
+    /* -- Turn counter (C.4) -- */
+    socket.on('turn:updated', ({ turnCount, maxTurns }) => {
+      setTurnInfo({ turnCount, maxTurns });
     });
 
     /* -- Connect -- */
@@ -586,6 +596,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     worldMeta,
     roomImages,
     npcPortraits,
+    turnInfo,
 
     joinSession,
     selectScenario,

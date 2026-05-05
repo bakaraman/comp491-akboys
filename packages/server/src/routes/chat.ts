@@ -600,6 +600,8 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
     const playerNames = Array.from(session.players.values()).map((p) => p.name).join(', ');
     let fullText = '';
     try {
+      const finaleScenario = getScenarioForSession(session);
+      const finaleMaxTurns = finaleScenario?.maxTurns ?? 40;
       for await (const chunk of streamFinale({
         world: session.world,
         outcome,
@@ -609,7 +611,7 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         evidencePresentedId: session.world.solution.keyEvidenceId,
         worldStateLog: session.worldStateLog,
         turnCount: session.mpTurnCount,
-        maxTurns: 40,
+        maxTurns: finaleMaxTurns,
       })) {
         fullText += chunk;
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
