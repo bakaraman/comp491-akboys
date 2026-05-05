@@ -693,7 +693,7 @@ function AccusationVoteBanner({
 }
 
 /* ================================================================== */
-/*  AccuseModal — simple suspect picker (replaces EvidenceBoard)        */
+/*  AccuseModal — simple suspect picker                                 */
 /* ================================================================== */
 
 interface AccuseSuspect {
