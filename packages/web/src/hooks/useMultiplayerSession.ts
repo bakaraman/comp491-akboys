@@ -295,16 +295,29 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
         setTurnInfo({ turnCount: session.turnCount, maxTurns: session.maxTurns });
       }
 
-      // Rebuild message history — server already filtered for this player
-      const restored: DisplayMessage[] = session.history.map((m, i) => ({
-        id: `restored_${i}`,
-        role: ((m as any).messageType === 'observed' ? 'observed' : m.role) as DisplayMessage['role'],
-        content: m.content,
-        playerId: m.playerId,
-        playerName: m.playerName,
-        playerColor: m.playerColor,
-        timestamp: Date.now(),
-      }));
+      // Rebuild message history — server already filtered for this player.
+      // C.1: 'global' messageType (shared opening narration) renders as a
+      // narrator message so it gets the italic gold-bordered narrator style.
+      const restored: DisplayMessage[] = session.history.map((m, i) => {
+        const messageType = (m as { messageType?: string }).messageType;
+        let role: DisplayMessage['role'];
+        if (messageType === 'observed') {
+          role = 'observed';
+        } else if (messageType === 'global') {
+          role = 'assistant';
+        } else {
+          role = m.role as DisplayMessage['role'];
+        }
+        return {
+          id: `restored_${i}`,
+          role,
+          content: m.content,
+          playerId: m.playerId,
+          playerName: m.playerName,
+          playerColor: m.playerColor,
+          timestamp: Date.now(),
+        };
+      });
       setMessages(restored);
       msgIdCounter.current = restored.length;
     });
