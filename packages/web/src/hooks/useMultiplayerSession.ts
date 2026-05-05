@@ -29,6 +29,8 @@ export interface DisplayMessage {
   playerName?: string;
   playerColor?: string;
   timestamp: number;
+  /** Server-side message classification. 'global' = shared opening narration. */
+  messageType?: 'global' | 'observed' | 'private' | 'action';
 }
 
 export interface BatchInfo {
@@ -295,16 +297,30 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
         setTurnInfo({ turnCount: session.turnCount, maxTurns: session.maxTurns });
       }
 
-      // Rebuild message history — server already filtered for this player
-      const restored: DisplayMessage[] = session.history.map((m, i) => ({
-        id: `restored_${i}`,
-        role: ((m as any).messageType === 'observed' ? 'observed' : m.role) as DisplayMessage['role'],
-        content: m.content,
-        playerId: m.playerId,
-        playerName: m.playerName,
-        playerColor: m.playerColor,
-        timestamp: Date.now(),
-      }));
+      // Rebuild message history — server already filtered for this player.
+      // C.1: 'global' messageType (shared opening narration) renders as a
+      // narrator message but with a distinct opening style (see ChatMessage).
+      const restored: DisplayMessage[] = session.history.map((m, i) => {
+        const messageType = (m as { messageType?: DisplayMessage['messageType'] }).messageType;
+        let role: DisplayMessage['role'];
+        if (messageType === 'observed') {
+          role = 'observed';
+        } else if (messageType === 'global') {
+          role = 'assistant';
+        } else {
+          role = m.role as DisplayMessage['role'];
+        }
+        return {
+          id: `restored_${i}`,
+          role,
+          content: m.content,
+          playerId: m.playerId,
+          playerName: m.playerName,
+          playerColor: m.playerColor,
+          timestamp: Date.now(),
+          messageType,
+        };
+      });
       setMessages(restored);
       msgIdCounter.current = restored.length;
     });
@@ -316,9 +332,20 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     /* -- Game start event -- */
-    socket.on('game:started', ({ players: startedPlayers }) => {
+    socket.on('game:started', ({ players: startedPlayers, openingNarration }) => {
       setGameState('playing');
       setPlayers(startedPlayers);
+      // C.1: Render the shared opening narration immediately so it survives
+      // the cinematic dismissing without requiring a page refresh.
+      if (openingNarration && openingNarration.trim().length > 0) {
+        addMessage({
+          role: 'assistant',
+          content: openingNarration,
+          playerName: 'Anlatıcı',
+          timestamp: Date.now(),
+          messageType: 'global',
+        });
+      }
     });
 
     /* -- Scenario voting events -- */

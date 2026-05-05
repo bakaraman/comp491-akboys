@@ -428,7 +428,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       {/* Messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {mp.messages.map((msg) => (
-          <ChatMessage key={msg.id} role={msg.role} content={msg.content} playerName={msg.playerName} playerColor={msg.playerColor} />
+          <ChatMessage
+            key={msg.id}
+            role={msg.role}
+            content={msg.content}
+            playerName={msg.playerName}
+            playerColor={msg.playerColor}
+            messageType={msg.messageType}
+          />
         ))}
         {mp.isNarratorStreaming && mp.streamingText && <ChatMessage role="assistant" content={mp.streamingText} />}
         {typingNames.length > 0 && (

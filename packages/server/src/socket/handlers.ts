@@ -1064,7 +1064,14 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       callback({ success: true });
 
       const allPlayers = getAllPlayerDTOs(store, sessionId);
-      io.to(sessionId).emit('game:started', { sessionId, scenarioTitle: scenario.title, players: allPlayers });
+      io.to(sessionId).emit('game:started', {
+        sessionId,
+        scenarioTitle: scenario.title,
+        players: allPlayers,
+        // C.1: Send opening narration in the same payload so clients can
+        // prepend it to chat without needing a session:state refetch.
+        openingNarration: session.world?.openingNarration,
+      });
 
       // C.4: Initial turn counter broadcast (turn 0 of N)
       io.to(sessionId).emit('turn:updated', {
@@ -1072,9 +1079,23 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         maxTurns: scenario.maxTurns,
       });
 
+      // C.1: Persist the shared opening narration to history BEFORE per-player
+      // entry hooks. visibleTo is left empty so filterHistoryForPlayer treats
+      // it as a global message — every player (including reconnects and late
+      // joiners) sees it as the first narrator entry in chat.
+      const world = session.world;
+      if (world.openingNarration && world.openingNarration.trim().length > 0) {
+        store.addMessage(sessionId, {
+          role: 'assistant',
+          content: world.openingNarration,
+          playerName: 'Anlatıcı',
+          timestamp: Date.now(),
+          messageType: 'global',
+        });
+      }
+
       // Emit per-player entry scene narration as the opening.
       // Each player gets ONE narrator chunk that is scoped to them (their entry hook).
-      const world = session.world;
       const entries = world.entryScenes;
       const playerList = Array.from(session.players.values());
       for (let i = 0; i < playerList.length; i++) {
