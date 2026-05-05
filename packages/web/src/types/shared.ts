@@ -115,6 +115,9 @@ export interface SessionStateDTO {
   scenarioVotes?: Record<string, string[]>;
   commHistory?: CommMessageDTO[];
   sharedEvidence?: SharedEvidenceEntry[];
+  /** C.4: turn counter for reload sync */
+  turnCount?: number;
+  maxTurns?: number;
 }
 
 export interface SharedEvidenceEntry {
@@ -235,5 +238,10 @@ export interface ServerToClientEvents {
     kind: 'opening' | 'room' | 'npc';
     id: string;
     url: string;
+  }) => void;
+  /** C.4: turn counter broadcast */
+  'turn:updated': (data: {
+    turnCount: number;
+    maxTurns: number;
   }) => void;
 }

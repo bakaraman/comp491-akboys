@@ -339,6 +339,29 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             {gameEmoji} {gameScenarioTitle}
           </span>
           {roomCode && <span style={{ fontSize: '10px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>{roomCode}</span>}
+          {/* C.4: Turn counter badge — color shifts as turns run out */}
+          {mp.turnInfo && (() => {
+            const { turnCount, maxTurns } = mp.turnInfo;
+            const remaining = maxTurns - turnCount;
+            const color = remaining <= 4 ? '#cf5b5b' : remaining <= 9 ? '#d4a843' : '#7a9ab8';
+            return (
+              <span
+                title={`${remaining} tur kaldı`}
+                style={{
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '1px',
+                  color,
+                  padding: '3px 8px',
+                  border: `1px solid ${color}`,
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {T.game.turnsLabel} {turnCount}/{maxTurns}
+              </span>
+            );
+          })()}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CopyLinkButton compact />

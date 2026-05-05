@@ -478,6 +478,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     // ---- #25: Increment MP turn counter after each batch ----
     session.mpTurnCount++;
 
+    // ---- C.4: Broadcast turn update so clients can render the counter ----
+    io.to(sessionId).emit('turn:updated', {
+      turnCount: session.mpTurnCount,
+      maxTurns: scenario.maxTurns,
+    });
+
     if (scenario && session.mpTurnCount >= scenario.maxTurns && session.state === 'playing') {
       session.state = 'ended';
       store.updateGameState(sessionId, {
@@ -582,6 +588,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
           sharedEvidence: session.sharedEvidence || [],
+          // C.4: turn counter for reload/late-join sync
+          turnCount: session.mpTurnCount,
+          maxTurns: joinScenario?.maxTurns,
         },
       });
 
@@ -1057,6 +1066,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const allPlayers = getAllPlayerDTOs(store, sessionId);
       io.to(sessionId).emit('game:started', { sessionId, scenarioTitle: scenario.title, players: allPlayers });
 
+      // C.4: Initial turn counter broadcast (turn 0 of N)
+      io.to(sessionId).emit('turn:updated', {
+        turnCount: session.mpTurnCount,
+        maxTurns: scenario.maxTurns,
+      });
+
       // Emit per-player entry scene narration as the opening.
       // Each player gets ONE narrator chunk that is scoped to them (their entry hook).
       const world = session.world;
@@ -1219,6 +1234,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
           sharedEvidence: session.sharedEvidence || [],
+          // C.4: turn counter for reload sync
+          turnCount: session.mpTurnCount,
+          maxTurns: scenario?.maxTurns,
         },
       });
 
