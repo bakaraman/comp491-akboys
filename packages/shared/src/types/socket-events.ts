@@ -182,6 +182,9 @@ export interface ServerToClientEvents {
     sessionId: string;
     scenarioTitle: string;
     players: PlayerDataDTO[];
+    /** C.1: shared opening narration so clients can render it immediately
+     *  without waiting for a session:state refetch (F5). */
+    openingNarration?: string;
   }) => void;
 
   /** Scoped narrator streaming — only the target player receives it */

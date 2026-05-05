@@ -133,6 +133,8 @@ export interface ServerToClientEvents {
     sessionId: string;
     scenarioTitle: string;
     players: PlayerDataDTO[];
+    /** C.1: shared opening narration for immediate render */
+    openingNarration?: string;
   }) => void;
   'narrator:chunk': (data: { content: string; fullText: string; targetPlayerId?: string }) => void;
   'narrator:done': (data: {

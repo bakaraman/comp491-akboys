@@ -29,6 +29,8 @@ export interface DisplayMessage {
   playerName?: string;
   playerColor?: string;
   timestamp: number;
+  /** Server-side message classification. 'global' = shared opening narration. */
+  messageType?: 'global' | 'observed' | 'private' | 'action';
 }
 
 export interface BatchInfo {
@@ -297,9 +299,9 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
 
       // Rebuild message history — server already filtered for this player.
       // C.1: 'global' messageType (shared opening narration) renders as a
-      // narrator message so it gets the italic gold-bordered narrator style.
+      // narrator message but with a distinct opening style (see ChatMessage).
       const restored: DisplayMessage[] = session.history.map((m, i) => {
-        const messageType = (m as { messageType?: string }).messageType;
+        const messageType = (m as { messageType?: DisplayMessage['messageType'] }).messageType;
         let role: DisplayMessage['role'];
         if (messageType === 'observed') {
           role = 'observed';
@@ -316,6 +318,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
           playerName: m.playerName,
           playerColor: m.playerColor,
           timestamp: Date.now(),
+          messageType,
         };
       });
       setMessages(restored);
@@ -329,9 +332,20 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     /* -- Game start event -- */
-    socket.on('game:started', ({ players: startedPlayers }) => {
+    socket.on('game:started', ({ players: startedPlayers, openingNarration }) => {
       setGameState('playing');
       setPlayers(startedPlayers);
+      // C.1: Render the shared opening narration immediately so it survives
+      // the cinematic dismissing without requiring a page refresh.
+      if (openingNarration && openingNarration.trim().length > 0) {
+        addMessage({
+          role: 'assistant',
+          content: openingNarration,
+          playerName: 'Anlatıcı',
+          timestamp: Date.now(),
+          messageType: 'global',
+        });
+      }
     });
 
     /* -- Scenario voting events -- */
