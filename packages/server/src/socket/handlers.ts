@@ -31,13 +31,19 @@ import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
 import {
   buildPlayerActionPrompt,
   buildOpeningPrompt,
+  buildSceneContext,
   parseStructuredResponse,
   parseLegacyTextResponse,
   parseStateChanges,
   buildCombinedUserMessage,
   validateDirective,
 } from './prompt-builder.js';
-import { narratorChatStream, narratorStructuredResponse, suggestFollowUps } from '../middleware/openai.js';
+import {
+  narratorChatStream,
+  narratorStructuredResponse,
+  suggestFollowUps,
+  buildContextFallbacks,
+} from '../middleware/openai.js';
 import {
   getScenarioForSession,
   generateWorld,
@@ -442,11 +448,17 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       // Generate scoped suggestions for the actor (witnesses don't get suggestions —
       // they read along but don't take actions on behalf of the actor).
+      // C.2: pass scene context so suggestions reference real NPCs / items / exits
+      // for the actor's CURRENT room (which may have changed mid-action via MOVE).
+      const updatedActor = store.getPlayer(sessionId, action.playerId);
+      const actorRoomId = updatedActor?.currentRoomId ?? action.roomId;
+      const sceneCtx = buildSceneContext(scenario, session, actorRoomId);
       let suggestions: string[];
       try {
-        suggestions = await suggestFollowUps(privateResponse);
+        suggestions = await suggestFollowUps(privateResponse, sceneCtx);
       } catch {
-        suggestions = ['Etrafına bak', 'Biriyle konuş', 'Başka odaya git'];
+        // Use the scene-aware fallback rather than scattered hardcoded tuples.
+        suggestions = buildContextFallbacks(sceneCtx);
       }
 
       // Send narrator:done to the actor AND to same-room witnesses.

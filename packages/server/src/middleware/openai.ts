@@ -189,21 +189,110 @@ export async function narratorChat(
 const FAST_MODEL = 'gpt-5-nano';
 
 /**
+ * Scene context for grounded suggestions — what the player can actually
+ * see/touch/talk-to in their current room. Without this, the model is
+ * blind and parrots whatever's in the system prompt example.
+ */
+export interface SceneContext {
+  /** Current room name (e.g. "Morg") */
+  roomName?: string;
+  /** Current room description for atmosphere */
+  roomDescription?: string;
+  /** NPCs physically in the same room as the player */
+  npcsInRoom?: { name: string; description: string }[];
+  /** Items in the same room */
+  itemsInRoom?: { name: string }[];
+  /** Names of rooms reachable through this room's exits */
+  adjacentRoomNames?: string[];
+}
+
+/**
+ * Build a context-aware fallback when the API fails or returns garbage.
+ * Always references something that actually exists in the scene, never
+ * a generic "Biriyle konuş" when no NPC is around.
+ */
+export function buildContextFallbacks(ctx?: SceneContext): string[] {
+  const out: string[] = [];
+
+  const npc = ctx?.npcsInRoom?.[0];
+  if (npc) out.push(`${npc.name}'a yaklaş`);
+
+  const item = ctx?.itemsInRoom?.[0];
+  if (item) out.push(`${item.name}'i incele`);
+
+  const adj = ctx?.adjacentRoomNames?.[0];
+  if (adj) out.push(`${adj}'a yönel`);
+
+  // Fill remaining slots with safe scene-agnostic prompts that always make sense.
+  const generic = ['Etrafa kulak ver', 'Eşyalarını gözden geçir', 'Çıkışı ara'];
+  let gi = 0;
+  while (out.length < 3 && gi < generic.length) {
+    out.push(generic[gi++]);
+  }
+  return out.slice(0, 3);
+}
+
+/**
  * Generate 3 follow-up action suggestions based on the last narrator response.
  * Uses gpt-5-nano with reasoning_effort "minimal" (0 reasoning tokens, ~1s latency).
+ *
+ * Pass `ctx` (scene context) so the model only suggests actions that reference
+ * NPCs, items, or rooms that actually exist right now. Without ctx, it falls
+ * back to generic suggestions but at least won't invent characters that aren't
+ * in the world (e.g. "Barmenle konuş" in a boarding-school scenario).
  */
-export async function suggestFollowUps(lastNarratorText: string): Promise<string[]> {
+export async function suggestFollowUps(
+  lastNarratorText: string,
+  ctx?: SceneContext,
+): Promise<string[]> {
+  // Compact, model-readable scene block. Kept short to avoid token bloat.
+  const sceneBlock = (() => {
+    if (!ctx) return '';
+    const lines: string[] = [];
+    if (ctx.roomName) {
+      lines.push(`Oda: ${ctx.roomName}${ctx.roomDescription ? ` — ${ctx.roomDescription}` : ''}`);
+    }
+    if (ctx.npcsInRoom && ctx.npcsInRoom.length > 0) {
+      lines.push(`Bu odadaki kişiler: ${ctx.npcsInRoom.map((n) => n.name).join(', ')}`);
+    } else {
+      lines.push('Bu odada kimse yok.');
+    }
+    if (ctx.itemsInRoom && ctx.itemsInRoom.length > 0) {
+      lines.push(`Görünen nesneler: ${ctx.itemsInRoom.map((i) => i.name).join(', ')}`);
+    }
+    if (ctx.adjacentRoomNames && ctx.adjacentRoomNames.length > 0) {
+      lines.push(`Komşu odalar: ${ctx.adjacentRoomNames.join(', ')}`);
+    }
+    return lines.join('\n');
+  })();
+
+  const systemPrompt = `Sen bir dedektif oyununda 3 öneri butonu üreten asistansın.
+
+KESİN KURALLAR:
+- ÇIKTI: SADECE 3 string içeren bir JSON dizisi. Başka bir şey yok.
+- HEPSİ TÜRKÇE. Her biri en fazla 6 kelime, SOMUT bir eylem.
+- Her öneri SAHNEDE GÖRÜNEN bir kişiye, nesneye veya komşu odaya atıfta bulunmalı.
+- Sahnede olmayan kişi/nesne/yer ASLA uydurma. Liste dışı isim kullanma.
+- Generic ifadeler ("biriyle konuş", "etrafa bak") yalnızca SAHNE TAMAMEN BOŞSA kullanılır.
+
+ÖRNEK 1 — Sahne: morg, kişiler [Doktor Şevket], nesneler [otopsi raporu, çelik makas]:
+["Doktor Şevket'e ölüm saatini sor","Otopsi raporunu oku","Çelik makası incele"]
+
+ÖRNEK 2 — Sahne: bahçe, kişi yok, nesneler [kırık fener], komşu [koridor]:
+["Kırık feneri al","Çitin ardına bak","Koridora yönel"]
+
+ÖRNEK 3 — Sahne: boş çatı katı, kişi yok, nesne yok, komşu [merdiven boşluğu]:
+["Etrafa kulak ver","Tozlu zemine bak","Merdiven boşluğuna in"]`;
+
+  const userPrompt = sceneBlock
+    ? `${sceneBlock}\n\nAnlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-400)}"\n\n3 Türkçe öneri (yalnızca JSON dizisi):`
+    : `Anlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-500)}"\n\n3 Türkçe öneri (yalnızca JSON dizisi):`;
+
   const completion = await getClient().chat.completions.create({
     model: FAST_MODEL,
     messages: [
-      {
-        role: 'system',
-        content: `Bir dedektif oyununda oyuncunun yapabileceği 3 KISA, SOMUT eylem öner. Her biri en fazla 5 kelime. HEPSİ TÜRKÇE. Yalnızca 3 string içeren bir JSON dizisi döndür. Örnek: ["Etrafına bak","Barmenle konuş","Kapıyı aç"]`,
-      },
-      {
-        role: 'user',
-        content: `Anlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-500)}"\n\n3 Türkçe eylem öner:`,
-      },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
     ],
     max_completion_tokens: 150,
     reasoning_effort: 'minimal' as 'low',
@@ -213,10 +302,10 @@ export async function suggestFollowUps(lastNarratorText: string): Promise<string
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length >= 3) {
-      return parsed.slice(0, 3);
+      return parsed.slice(0, 3).map((s: unknown) => String(s));
     }
   } catch { /* fallback below */ }
-  return ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'];
+  return buildContextFallbacks(ctx);
 }
 
 // extractGameStateUpdate removed: was a bag of regex heuristics for single-player.
