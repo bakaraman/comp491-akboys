@@ -1,25 +1,26 @@
 /**
  * reconstruction.ts — Post-game crime-scene reconstruction generator
  *
- * Given a finished session's world + worldStateLog, asks GPT-5-nano to lay
- * out the killer's actual timeline of events. Output is constrained by a
- * strict Zod enum so the AI can only reference rooms and NPCs that really
- * exist in this world — it cannot invent characters or locations. Display
- * names are then enriched server-side from the canonical WorldData.
+ * Two-pass design (2026-05-06 v2):
  *
- * The solution (culprit, motive, key evidence) is stated to the AI as
- * canon, not asked. The AI's only job is to *retell* the truth as a
- * chronological timeline, not to deduce it.
+ *   Pass 1 — Events (gpt-5-nano + strict zodResponseFormat).
+ *     The AI fills 6-8 chronological beats with roomId/actorNpcId locked
+ *     to enums of real world ids. We enrich names server-side after.
  *
- * Hardening (2026-05-06):
- *   - Tightened event count band (6-8) for predictable token budget.
- *   - max_completion_tokens raised from 2500 → 5000 to leave room after
- *     gpt-5-nano's reasoning tokens (mid-sentence cut on conclusions).
- *   - Prompt names rooms/NPCs/items by display name first, IDs hidden in
- *     a `[id: ...]` suffix and explicitly forbidden in description text.
- *   - scrubIds() post-processes description + conclusion as a safety net,
- *     replacing any leaked `snake_case` ID with its canonical display name.
- *   - finish_reason logged so we can spot truncation immediately.
+ *   Pass 2 — Conclusion (gpt-4o-mini, plain text, no reasoning tokens).
+ *     A non-reasoning model gets a tiny prompt summarising the canon
+ *     (culprit, motive, evidence) plus the just-generated events, and
+ *     returns 3-4 plain Turkish sentences. No JSON, no schema, no
+ *     reasoning budget — so the conclusion always completes.
+ *
+ * Why two passes? Single-call gpt-5-nano kept truncating the conclusion
+ * mid-sentence even at max_completion_tokens=5000. Reasoning models
+ * count reasoning + output against the same cap, and strict JSON schema
+ * generation eats a lot of reasoning. Splitting the conclusion into a
+ * dedicated non-reasoning call removes the entire failure mode.
+ *
+ * The solution (culprit, motive, key evidence) is stated to both passes
+ * as canon. The AI's only job is to *retell* the truth, not deduce it.
  *
  * @author AKBOYS Team
  * @since 2026-05-06
@@ -31,8 +32,10 @@ import { zodResponseFormat } from 'openai/helpers/zod.mjs';
 import type { WorldData, ReconstructionDTO, ReconstructionEvent } from '@akboys/shared';
 
 const DEBUG = '[reconstruction]';
-const MODEL = 'gpt-5-nano';
-const MAX_TOKENS = 5000;
+const EVENTS_MODEL = 'gpt-5-nano';
+const EVENTS_MAX_TOKENS = 6000;
+const CONCLUSION_MODEL = 'gpt-4o-mini';
+const CONCLUSION_MAX_TOKENS = 500;
 
 let _client: OpenAI | null = null;
 function client(): OpenAI {
@@ -41,11 +44,10 @@ function client(): OpenAI {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Strict schema — AI cannot reference rooms or NPCs outside the     */
-/*  world. We build the enums dynamically from the live WorldData.    */
+/*  Pass-1 schema: events only (no conclusion).                       */
 /* ------------------------------------------------------------------ */
 
-interface RawReconstruction {
+interface RawEvents {
   events: Array<{
     turn: number;
     time: string;
@@ -54,15 +56,13 @@ interface RawReconstruction {
     description: string;
     isCulpritAction: boolean;
   }>;
-  conclusion: string;
 }
 
-function buildSchema(world: WorldData): z.ZodType<RawReconstruction> {
+function buildEventsSchema(world: WorldData): z.ZodType<RawEvents> {
   const roomIds = world.rooms.map((r) => r.id);
   const npcIds = world.npcs.map((n) => n.id);
 
   const RoomIdEnum = z.enum(roomIds as [string, ...string[]]);
-  // '' means "no actor for this beat" — atmospheric / off-screen events.
   const ActorIdEnum = z.enum(['', ...npcIds] as [string, ...string[]]);
 
   return z.object({
@@ -81,9 +81,7 @@ function buildSchema(world: WorldData): z.ZodType<RawReconstruction> {
             .string()
             .min(15)
             .max(200)
-            .describe(
-              '1-2 short Turkish sentences. Use ONLY display names — never ids or snake_case.',
-            ),
+            .describe('1-2 short Turkish sentences. Use ONLY display names — never ids or snake_case.'),
           isCulpritAction: z
             .boolean()
             .describe('True when this beat is the killer doing something pivotal.'),
@@ -92,27 +90,17 @@ function buildSchema(world: WorldData): z.ZodType<RawReconstruction> {
       .min(6)
       .max(8)
       .describe('Chronological reconstruction beats, 6-8 entries. Earliest first.'),
-    conclusion: z
-      .string()
-      .min(60)
-      .max(420)
-      .describe(
-        'Closing paragraph in Turkish, 3-4 complete sentences. MUST end with proper punctuation. '
-          + 'Cover: how the murder happened, the killer\'s name, the motive, the key evidence.',
-      ),
-  }) as z.ZodType<RawReconstruction>;
+  }) as z.ZodType<RawEvents>;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Prompt construction                                                */
+/*  Pass-1 prompt: events                                              */
 /* ------------------------------------------------------------------ */
 
-function buildPrompt(world: WorldData, worldStateLog: string[]): { system: string; user: string } {
+function buildEventsPrompt(world: WorldData, worldStateLog: string[]): { system: string; user: string } {
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
 
-  // Display name first, ID in small bracket suffix. Items have NO id shown
-  // because the schema doesn't reference them — only their human names matter.
   const roomsBlock = world.rooms
     .map((r) => `  • ${r.name} — ${r.description}  [id: ${r.id}]`)
     .join('\n');
@@ -149,18 +137,13 @@ GÖREVİN:
 - Stil: kısa, somut, gazeteci raporu gibi. Süsleme yok. Pamuk değil.
 
 İSİM KURALI (ÇOK ÖNEMLİ):
-- description ve conclusion alanlarında SADECE OKUNABILIR TÜRKÇE İSİMLER kullan.
+- description alanlarında SADECE OKUNABILIR TÜRKÇE İSİMLER kullan.
 - ASLA snake_case yazma. ASLA "_" karakteri içeren id yazma.
   Yanlış: "back_hall", "leo_marcus", "cufflink_with_velvet_fiber"
   Doğru:  "Arka Koridor", "Leo Marcus", "Kadife Lifli Kol Düğmesi"
 - ID'ler yalnızca roomId / actorNpcId JSON alanlarına gider — metin içine ASLA.
 
-SONUÇ KURALI:
-- conclusion alanı 3-4 TAM cümle olmalı, mutlaka nokta/ünlem/soru işareti ile bitsin.
-- İçinde olmalı: cinayetin nasıl işlendiği, katilin TAM ADI, motivi, anahtar kanıtın TAM ADI.
-- Asla yarım cümle bırakma.
-
-ÇIKTI: yalnızca strict JSON, başka açıklama yok.`;
+ÇIKTI: yalnızca strict JSON, başka açıklama yok. (Sonuç paragrafı bu çağrıda YOK.)`;
 
   const user = `DÜNYA: ${world.meta.title}
 ZEMİN: ${world.meta.setting}
@@ -183,7 +166,7 @@ ${logBlock}
 Şimdi cinayetin gerçek timeline'ını üret. Kronolojik 6-8 olay, Türkçe.
 - Her olay yalnızca yukarıdaki listelerden roomId ve actorNpcId kullansın.
 - description'da sadece okunabilir Türkçe isimler kullan, ID veya snake_case yazma.
-- En sonunda 3-4 cümlelik tam bir conclusion paragrafı yaz: cinayetin nasıl işlendiği, katilin tam adı, motivi, anahtar kanıtın tam adı. Cümleyi yarıda bırakma.`;
+- Sonuç paragrafı bu çağrıda YOK — sadece events array'i doldur.`;
 
   return { system, user };
 }
@@ -192,11 +175,6 @@ ${logBlock}
 /*  Safety net: replace any leaked id with its display name            */
 /* ------------------------------------------------------------------ */
 
-/**
- * Last-line defense against the model leaking a raw id into prose. We
- * sort by id-length descending so longer ids are replaced before shorter
- * substrings of them (e.g. "leo_marcus" before "leo").
- */
 function buildScrubber(world: WorldData): (text: string) => string {
   const replacements: Array<{ id: string; name: string }> = [];
   for (const r of world.rooms) replacements.push({ id: r.id, name: r.name });
@@ -212,7 +190,6 @@ function buildScrubber(world: WorldData): (text: string) => string {
   return (text: string): string => {
     let out = text;
     for (const { id, name } of snakeIds) {
-      // Word-boundary-aware: avoids partial replacement inside other words.
       const safeId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       out = out.replace(new RegExp(`\\b${safeId}\\b`, 'g'), name);
     }
@@ -221,13 +198,87 @@ function buildScrubber(world: WorldData): (text: string) => string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public API                                                          */
+/*  Pass-2: conclusion (separate non-reasoning call)                   */
 /* ------------------------------------------------------------------ */
 
 /**
- * Generate a reconstruction DTO for a finished session. Throws on AI
- * failure — caller should wrap in try/catch and surface a graceful error.
+ * Plain-text conclusion. gpt-4o-mini is non-reasoning, so the entire
+ * max_tokens budget goes to output — no risk of reasoning eating the
+ * paragraph and leaving us with a half-sentence.
  */
+async function generateConclusionText(
+  world: WorldData,
+  events: ReconstructionEvent[],
+): Promise<string> {
+  const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
+  const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
+
+  const eventsBlock = events
+    .map((e, i) => {
+      const actorPart = e.actorName ? ` ${e.actorName}` : '';
+      return `${i + 1}. ${e.time} — ${e.roomName}:${actorPart} ${e.description}`;
+    })
+    .join('\n');
+
+  const system = `Sen kısa Türkçe noir polisiye anlatıcısısın. Görevin: verilen olay zincirinden 3-4 cümlelik bir KAPANIŞ paragrafı yazmak.
+
+KESİN KURALLAR:
+- 3-4 TAM cümle. Her cümle nokta/ünlem/soru ile bitsin.
+- ASLA yarım cümle bırakma. Cümleyi tamamlamadan durma.
+- İçinde mutlaka olmalı: cinayetin nasıl işlendiği, katilin TAM ADI, motivi, anahtar kanıtın TAM ADI.
+- Sadece okunabilir Türkçe isimler. ASLA snake_case veya "_" içeren id yazma.
+- Süsleme yok, gazeteci özeti gibi sade.
+- Sadece paragrafı yaz, başlık veya açıklama yazma.`;
+
+  const user = `KATİL: ${culprit?.name ?? 'bilinmiyor'} (rol: ${culprit?.role ?? '?'})
+MOTİV: ${world.solution.motiveShort}
+ANAHTAR KANIT: ${keyEv?.name ?? 'bilinmiyor'}
+KURBAN/ZEMİN: ${world.meta.title} — ${world.meta.setting}
+
+OLAY ZİNCİRİ:
+${eventsBlock}
+
+Şimdi yukarıdaki gerçeği özetleyen 3-4 cümlelik kapanış paragrafı yaz. Cümleyi yarıda bırakma.`;
+
+  const completion = await client().chat.completions.create({
+    model: CONCLUSION_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    max_tokens: CONCLUSION_MAX_TOKENS,
+    temperature: 0.55,
+  });
+
+  const choice = completion.choices[0];
+  const finishReason = choice?.finish_reason;
+  const text = choice?.message?.content?.trim() ?? '';
+  if (!text) throw new Error('Conclusion call returned empty content');
+
+  if (finishReason === 'length') {
+    console.warn(`${DEBUG} ⚠ conclusion finish_reason=length — bumping CONCLUSION_MAX_TOKENS may help`);
+  }
+  console.log(`${DEBUG}   conclusion ${text.length} chars (finish=${finishReason})`);
+  return text;
+}
+
+/**
+ * Deterministic fallback if the conclusion call fails entirely. Built
+ * from solution canon so it's always coherent, just not stylistically
+ * great. Better than showing the user nothing.
+ */
+function fallbackConclusion(world: WorldData): string {
+  const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
+  const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
+  const culpritName = culprit?.name ?? 'katil';
+  const evidenceName = keyEv?.name ?? 'anahtar kanıt';
+  return `Cinayet, ${world.solution.motiveShort} sebebiyle işlendi. Katilin kimliği ${culpritName} olarak belirlendi. Anahtar kanıt: ${evidenceName}.`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public API                                                          */
+/* ------------------------------------------------------------------ */
+
 export async function generateReconstruction(
   world: WorldData,
   worldStateLog: string[],
@@ -235,38 +286,32 @@ export async function generateReconstruction(
   const t0 = Date.now();
   console.log(`${DEBUG} ▶ generating (${world.rooms.length} rooms, ${world.npcs.length} npcs, ${worldStateLog.length} log entries)`);
 
-  const { system, user } = buildPrompt(world, worldStateLog);
-  const schema = buildSchema(world);
+  /* ---- Pass 1: events (strict JSON, gpt-5-nano) ---- */
+  const { system, user } = buildEventsPrompt(world, worldStateLog);
+  const schema = buildEventsSchema(world);
 
   const completion = await client().chat.completions.create({
-    model: MODEL,
+    model: EVENTS_MODEL,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    max_completion_tokens: MAX_TOKENS,
+    max_completion_tokens: EVENTS_MAX_TOKENS,
     reasoning_effort: 'minimal' as 'low',
-    response_format: zodResponseFormat(schema, 'crime_reconstruction'),
+    response_format: zodResponseFormat(schema, 'crime_reconstruction_events'),
   });
 
   const choice = completion.choices[0];
   const finishReason = choice?.finish_reason;
   const raw = choice?.message?.content;
-  if (!raw) {
-    throw new Error('Reconstruction returned empty content');
-  }
+  if (!raw) throw new Error('Reconstruction events call returned empty content');
   if (finishReason === 'length') {
-    console.warn(`${DEBUG} ⚠ finish_reason=length — output may be truncated despite ${MAX_TOKENS} token budget`);
+    console.warn(`${DEBUG} ⚠ events finish_reason=length — bumping EVENTS_MAX_TOKENS may help`);
   }
 
-  const parsed = JSON.parse(raw) as RawReconstruction;
+  const parsed = JSON.parse(raw) as RawEvents;
   const scrub = buildScrubber(world);
 
-  // Server-side enrichment: AI gave us only IDs, we resolve them to display
-  // names from the authoritative WorldData. This guarantees the UI shows
-  // exactly the same room/character names as in the live game, regardless
-  // of what the AI happened to write in its `description` field. We also
-  // scrub leaked snake_case ids out of `description` as a safety net.
   const events: ReconstructionEvent[] = parsed.events.map((e) => {
     const room = world.rooms.find((r) => r.id === e.roomId);
     const actor = e.actorNpcId ? world.npcs.find((n) => n.id === e.actorNpcId) : null;
@@ -283,14 +328,21 @@ export async function generateReconstruction(
     };
   });
 
-  let conclusion = scrub(parsed.conclusion.trim());
-  // Sanity: if the model still managed to cut the conclusion mid-sentence
-  // (no terminal punctuation), append an ellipsis so the UI never shows a
-  // raw mid-word stop. This is a UX safeguard, not a correctness fix —
-  // finish_reason logging above will tell us if we need to bump tokens.
-  if (!/[.!?…»"')\]]\s*$/.test(conclusion)) {
-    console.warn(`${DEBUG} ⚠ conclusion lacks terminal punctuation, appending ellipsis. tail="${conclusion.slice(-40)}"`);
-    conclusion = `${conclusion.replace(/[\s,;:—-]+$/, '')}…`;
+  /* ---- Pass 2: conclusion (plain text, gpt-4o-mini) ---- */
+  let conclusion: string;
+  try {
+    const raw2 = await generateConclusionText(world, events);
+    conclusion = scrub(raw2);
+    // Sanity: terminator check. With gpt-4o-mini + 500 tokens this should
+    // basically never trigger — but if a network blip cuts the response,
+    // we still patch the tail rather than show a half-sentence.
+    if (!/[.!?…»"')\]]\s*$/.test(conclusion)) {
+      console.warn(`${DEBUG} ⚠ conclusion lacks terminal punctuation, appending ellipsis. tail="${conclusion.slice(-40)}"`);
+      conclusion = `${conclusion.replace(/[\s,;:—-]+$/, '')}…`;
+    }
+  } catch (err) {
+    console.error(`${DEBUG} conclusion call failed, using deterministic fallback`, err);
+    conclusion = fallbackConclusion(world);
   }
 
   const dto: ReconstructionDTO = {
@@ -302,7 +354,7 @@ export async function generateReconstruction(
 
   console.log(
     `${DEBUG} ✓ ${events.length} events, ${dto.conclusion.length} char conclusion `
-      + `(${Date.now() - t0}ms, finish=${finishReason})`,
+      + `(${Date.now() - t0}ms total, events finish=${finishReason})`,
   );
   return dto;
 }
