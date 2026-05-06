@@ -154,6 +154,14 @@ export interface SessionStore {
 
   /** A.3: Cache the reconstruction payload generated post-game. */
   setReconstruction(sessionId: string, data: ReconstructionDTO): void;
+
+  /**
+   * A.3 single-flight: track an in-flight reconstruction Promise so two
+   * concurrent clients don't both burn an LLM call and race each other.
+   */
+  getInflightReconstruction(sessionId: string): Promise<ReconstructionDTO> | undefined;
+  setInflightReconstruction(sessionId: string, promise: Promise<ReconstructionDTO>): void;
+  clearInflightReconstruction(sessionId: string): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -184,6 +192,12 @@ export class MemorySessionStore implements SessionStore {
   protected sessions: Map<string, SessionData> = new Map();
   protected roomCodeIndex: Map<string, string> = new Map(); // roomCode -> sessionId
   protected cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * A.3 single-flight: when a reconstruction is being generated, the Promise
+   * lives here so concurrent requests can await the same result instead of
+   * each firing their own LLM call. Process-local; not persisted.
+   */
+  protected inflightReconstructions: Map<string, Promise<ReconstructionDTO>> = new Map();
   private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
 
@@ -469,6 +483,18 @@ export class MemorySessionStore implements SessionStore {
     if (!session) return;
     session.reconstruction = data;
     session.lastActivityAt = Date.now();
+  }
+
+  getInflightReconstruction(sessionId: string): Promise<ReconstructionDTO> | undefined {
+    return this.inflightReconstructions.get(sessionId);
+  }
+
+  setInflightReconstruction(sessionId: string, promise: Promise<ReconstructionDTO>): void {
+    this.inflightReconstructions.set(sessionId, promise);
+  }
+
+  clearInflightReconstruction(sessionId: string): void {
+    this.inflightReconstructions.delete(sessionId);
   }
 }
 

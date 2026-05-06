@@ -21,7 +21,7 @@ import {
 import { buildSceneContext } from '../socket/prompt-builder.js';
 import { requireAuth } from '../middleware/auth.js';
 import { SCENARIOS } from '@akboys/shared';
-import type { Scenario } from '@akboys/shared';
+import type { Scenario, ReconstructionDTO } from '@akboys/shared';
 import {
   FirestoreSessionStore,
   MemorySessionStore,
@@ -677,10 +677,31 @@ chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Respon
       return;
     }
 
-    // Cache miss — generate.
-    const dto = await generateReconstruction(session.world, session.worldStateLog);
-    store.setReconstruction(sessionId, dto);
-    res.json({ reconstruction: dto });
+    // Single-flight: if another client kicked off a generation moments ago,
+    // await the same Promise instead of starting a parallel LLM call. Two
+    // racing calls would otherwise produce two different reconstructions
+    // (different event counts, different conclusions) — each client keeping
+    // its own response while the second write quietly overwrites the first.
+    const inflight = store.getInflightReconstruction(sessionId);
+    if (inflight) {
+      console.log(`[reconstruction ${sessionId.slice(0, 8)}] ⇢ awaiting in-flight generation`);
+      const dto = await inflight;
+      res.json({ reconstruction: dto });
+      return;
+    }
+
+    const generation = (async (): Promise<ReconstructionDTO> => {
+      const dto = await generateReconstruction(session.world!, session.worldStateLog);
+      store.setReconstruction(sessionId, dto);
+      return dto;
+    })();
+    store.setInflightReconstruction(sessionId, generation);
+    try {
+      const dto = await generation;
+      res.json({ reconstruction: dto });
+    } finally {
+      store.clearInflightReconstruction(sessionId);
+    }
   } catch (err) {
     console.error(`${DEBUG_PREFIX} reconstruction error`, err);
     if (!res.headersSent) res.status(500).json({ error: 'Reconstruction failed' });
