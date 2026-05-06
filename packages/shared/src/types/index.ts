@@ -26,6 +26,8 @@ export type {
   AccusationVote,
   NPCState,
   HiddenExit,
+  ReconstructionEvent,
+  ReconstructionDTO,
 } from './game.js';
 
 export { PLAYER_COLORS, PLAYER_ROLES } from './game.js';

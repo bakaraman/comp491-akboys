@@ -11,3 +11,4 @@ export * from './tts.js';
 export * from './finale.js';
 export * from './adapter.js';
 export * from './session-helpers.js';
+export * from './reconstruction.js';

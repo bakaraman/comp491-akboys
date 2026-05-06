@@ -163,4 +163,20 @@ export const T = {
     open: 'Ses ayarları',
     close: 'Kapat',
   },
+
+  reconstruction: {
+    cta: 'Olay Yerini Yeniden Canlandır',
+    loading: 'Gerçek olaylar bir araya getiriliyor…',
+    failed: 'Olay zinciri çıkarılamadı.',
+    retry: 'Tekrar Dene',
+    title: 'Gerçekte Ne Oldu',
+    culpritBadge: 'Katilin hareketi',
+    autoplay: 'Otomatik Oynat',
+    pause: 'Duraklat',
+    next: 'Sonraki',
+    prev: 'Önceki',
+    close: 'Kapat',
+    eventOf: 'Olay {n} / {total}',
+    conclusionTitle: 'Sonuç',
+  },
 } as const;

@@ -36,6 +36,7 @@ import {
   generateAllNpcPortraits,
   streamTts,
   streamFinale,
+  generateReconstruction,
   type FinaleOutcome,
 } from '../world/index.js';
 
@@ -641,5 +642,47 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error(`${DEBUG_PREFIX} finale error`, err);
     if (!res.headersSent) res.status(500).json({ error: 'Finale failed' });
+  }
+});
+
+/* ================================================================== */
+/*  POST /api/chat/reconstruction — A.3 / Issue #36                    */
+/*  Crime-scene reconstruction timeline. Cached on the session so      */
+/*  re-opening the modal doesn't re-burn an LLM call.                  */
+/* ================================================================== */
+chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body as { sessionId?: string };
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId is required' });
+      return;
+    }
+
+    const session = store.get(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    if (!session.world) {
+      res.status(400).json({ error: 'No world for this session' });
+      return;
+    }
+
+    // Cache hit — return the previously generated reconstruction. Idempotent
+    // for the lifetime of the session, which is what we want: the modal
+    // can be reopened multiple times without thrashing the LLM.
+    if (session.reconstruction) {
+      console.log(`[reconstruction ${sessionId.slice(0, 8)}] ✓ cache hit (${session.reconstruction.events.length} events)`);
+      res.json({ reconstruction: session.reconstruction });
+      return;
+    }
+
+    // Cache miss — generate.
+    const dto = await generateReconstruction(session.world, session.worldStateLog);
+    store.setReconstruction(sessionId, dto);
+    res.json({ reconstruction: dto });
+  } catch (err) {
+    console.error(`${DEBUG_PREFIX} reconstruction error`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'Reconstruction failed' });
   }
 });

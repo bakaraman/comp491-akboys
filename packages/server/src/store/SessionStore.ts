@@ -24,6 +24,7 @@ import type {
   AccusationVote,
   NPCState,
   WorldData,
+  ReconstructionDTO,
 } from '@akboys/shared';
 import { PLAYER_COLORS } from '@akboys/shared';
 
@@ -105,6 +106,13 @@ export interface SessionData {
 
   /** Whether opening is ready (image + TTS if used) — game can start */
   openingReady: boolean;
+
+  /**
+   * A.3: Cached crime-scene reconstruction. Generated lazily after the game
+   * ends, on first request from the client. Cached so re-opening the
+   * "Show Reconstruction" modal doesn't re-burn an LLM call.
+   */
+  reconstruction: ReconstructionDTO | null;
 }
 
 /** Contract every session store must satisfy */
@@ -143,6 +151,9 @@ export interface SessionStore {
   setRoomImage(sessionId: string, roomId: string, url: string | null): void;
   setNpcPortrait(sessionId: string, npcId: string, url: string | null): void;
   markOpeningReady(sessionId: string): void;
+
+  /** A.3: Cache the reconstruction payload generated post-game. */
+  setReconstruction(sessionId: string, data: ReconstructionDTO): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -221,6 +232,7 @@ export class MemorySessionStore implements SessionStore {
       roomImages: {},
       npcPortraits: {},
       openingReady: false,
+      reconstruction: null,
     };
 
     this.sessions.set(session.id, session);
@@ -451,6 +463,13 @@ export class MemorySessionStore implements SessionStore {
     session.openingReady = true;
     session.lastActivityAt = Date.now();
   }
+
+  setReconstruction(sessionId: string, data: ReconstructionDTO): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.reconstruction = data;
+    session.lastActivityAt = Date.now();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -519,6 +538,7 @@ interface StoredSessionData {
   roomImages?: Record<string, string | null>;
   npcPortraits?: Record<string, string | null>;
   openingReady?: boolean;
+  reconstruction?: ReconstructionDTO | null;
 }
 
 function serializeSession(session: SessionData): StoredSessionData {
@@ -563,6 +583,7 @@ function serializeSession(session: SessionData): StoredSessionData {
     roomImages: session.roomImages,
     npcPortraits: session.npcPortraits,
     openingReady: session.openingReady,
+    reconstruction: session.reconstruction,
   };
 }
 
@@ -617,6 +638,7 @@ function deserializeSession(data: StoredSessionData): SessionData {
     roomImages: data.roomImages ?? {},
     npcPortraits: data.npcPortraits ?? {},
     openingReady: data.openingReady ?? false,
+    reconstruction: data.reconstruction ?? null,
   };
 }
 
@@ -745,6 +767,11 @@ export class FirestoreSessionStore extends MemorySessionStore {
 
   override markOpeningReady(sessionId: string): void {
     super.markOpeningReady(sessionId);
+    void this.sync(sessionId);
+  }
+
+  override setReconstruction(sessionId: string, data: ReconstructionDTO): void {
+    super.setReconstruction(sessionId, data);
     void this.sync(sessionId);
   }
 }

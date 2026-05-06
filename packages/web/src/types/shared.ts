@@ -97,6 +97,29 @@ export interface ClientToServerEvents {
   ) => void;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Reconstruction (A.3) — mirror of @akboys/shared types              */
+/* ------------------------------------------------------------------ */
+
+export interface ReconstructionEvent {
+  turn: number;
+  time: string;
+  roomId: string;
+  roomName: string;
+  actorNpcId: string;
+  actorName: string;
+  actorRole: string;
+  description: string;
+  isCulpritAction: boolean;
+}
+
+export interface ReconstructionDTO {
+  title: string;
+  events: ReconstructionEvent[];
+  conclusion: string;
+  generatedAt: number;
+}
+
 export interface SessionStateDTO {
   id: string;
   scenarioId: string;

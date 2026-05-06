@@ -253,3 +253,50 @@ export interface WorldStateEvent {
   roomId: string;
   timestamp: number;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Crime scene reconstruction (A.3 / Issue #36)                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One step in the post-game timeline shown by ReconstructionReplay.
+ *
+ * The AI is constrained to emit only `roomId` and `actorNpcId` from
+ * enums the server hands it (drawn from the live world), so it can
+ * never invent a room or character that doesn't exist. Display names
+ * (`roomName`, `actorName`, `actorRole`) are server-enriched from the
+ * authoritative WorldData — they do NOT come from the AI.
+ *
+ * `actorNpcId === ''` means "no specific actor" (atmospheric beat,
+ * environmental change, off-screen victim moment, etc.).
+ */
+export interface ReconstructionEvent {
+  /** In-game turn this beat happened on (informational, not enforced). */
+  turn: number;
+  /** In-fiction clock time, e.g. "23:14". */
+  time: string;
+  /** Room ID — must match an existing world.rooms[].id. */
+  roomId: string;
+  /** Display name for the room (server-enriched). */
+  roomName: string;
+  /** NPC ID — must match world.npcs[].id, or '' for "no actor". */
+  actorNpcId: string;
+  /** Display name for the actor (server-enriched, e.g. "Doktor Şevket"). */
+  actorName: string;
+  /** Actor's role from world.npcs (e.g. "doktor"). Empty when no actor. */
+  actorRole: string;
+  /** 1-2 Turkish sentences describing this beat. */
+  description: string;
+  /** True if this is the culprit doing something pivotal — UI highlights. */
+  isCulpritAction: boolean;
+}
+
+/** Full reconstruction payload sent from the server to the client. */
+export interface ReconstructionDTO {
+  title: string;
+  events: ReconstructionEvent[];
+  /** 2-3 Turkish sentences summarising what really happened. */
+  conclusion: string;
+  /** Generation timestamp; allows the client to detect regenerations. */
+  generatedAt: number;
+}
