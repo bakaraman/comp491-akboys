@@ -88,9 +88,11 @@ export function LobbyScreen({
         position: 'relative',
       }}
     >
-      {/* A.2: Audio settings — fixed top-left so it's always reachable in lobby */}
+      {/* A.2: Audio settings — fixed top-left so it's always reachable in
+          lobby. align="left" so the panel opens rightward and doesn't
+          overflow the left edge of the viewport. */}
       <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
-        <SettingsPopover />
+        <SettingsPopover align="left" />
       </div>
       <div style={{ textAlign: 'center', maxWidth: '720px', width: '100%', marginTop: '24px' }}>
         {/* Room code */}

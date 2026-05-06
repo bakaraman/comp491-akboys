@@ -118,7 +118,19 @@ function ChannelRow({ label, volume, onVolumeChange, muted, onToggleMute }: Chan
 /*  Main popover                                                       */
 /* ------------------------------------------------------------------ */
 
-export function SettingsPopover(): React.ReactElement {
+export interface SettingsPopoverProps {
+  /**
+   * Which side of the trigger button the popover panel anchors to.
+   * - 'right' (default): panel's right edge aligns with the trigger,
+   *   panel grows leftward. Use when the trigger sits near the right
+   *   edge of the viewport.
+   * - 'left': panel's left edge aligns with the trigger, panel grows
+   *   rightward. Use when the trigger sits near the left edge.
+   */
+  align?: 'left' | 'right';
+}
+
+export function SettingsPopover({ align = 'right' }: SettingsPopoverProps): React.ReactElement {
   const ambient = useAmbientSettings();
   const sfx = useSoundEffects();
   const [open, setOpen] = useState(false);
@@ -182,7 +194,7 @@ export function SettingsPopover(): React.ReactElement {
           style={{
             position: 'absolute',
             top: 'calc(100% + 8px)',
-            right: 0,
+            ...(align === 'left' ? { left: 0 } : { right: 0 }),
             width: '260px',
             padding: '16px 18px 12px',
             backgroundColor: '#0f0d0a',

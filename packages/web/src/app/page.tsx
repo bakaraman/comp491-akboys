@@ -141,9 +141,10 @@ export default function HomePage() {
         {name && <ProfileButton name={name} onNameChange={setName} onSignOut={handleSignOut} />}
 
         {/* A.2: Audio settings — fixed top-left so it never collides with
-            ProfileButton (top-right) regardless of name length. */}
+            ProfileButton (top-right) regardless of name length. align="left"
+            makes the panel grow rightward so it never spills off-screen. */}
         <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
-          <SettingsPopover />
+          <SettingsPopover align="left" />
         </div>
 
         <div style={{ width: '100%', maxWidth: '560px', textAlign: 'center' }}>
