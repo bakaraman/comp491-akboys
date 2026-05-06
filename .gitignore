@@ -46,5 +46,10 @@ README_KADIR.md
 CLAUDE_KADIR.md
 TODO.md
 
+# Playwright MCP test artifacts (browser snapshots, console logs, screenshots)
+.playwright-mcp/
+a2-*.png
+a3-*.png
+
 # TypeScript build info
 packages/*/tsconfig.tsbuildinfo

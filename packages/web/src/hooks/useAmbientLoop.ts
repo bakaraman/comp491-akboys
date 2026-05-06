@@ -122,6 +122,12 @@ interface SubscriberHandle {
 const audios = new Map<string, HTMLAudioElement>();
 const subscribers = new Map<string, Set<SubscriberHandle>>();
 const fadeTimers = new Map<string, ReturnType<typeof setInterval>>();
+/** Pending fade-out timeouts. Held in a Map so we can cancel them if a
+ *  new subscriber arrives within the grace window — this absorbs React
+ *  Strict Mode's mount→cleanup→mount thrash and Next.js route hand-offs
+ *  without causing audible volume dips. */
+const pendingSilence = new Map<string, ReturnType<typeof setTimeout>>();
+const SILENCE_GRACE_MS = 250;
 
 function ensureAudio(url: string): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null;
@@ -131,6 +137,13 @@ function ensureAudio(url: string): HTMLAudioElement | null {
     audio.loop = true;
     audio.volume = 0;
     audio.preload = 'auto';
+    // Tag the element with a stable data attribute and attach it to the
+    // document so it's reachable via querySelector for debugging and
+    // automated UI checks. Hidden by default (no `controls` attribute).
+    audio.dataset.ambientUrl = url;
+    if (typeof document !== 'undefined') {
+      document.body.appendChild(audio);
+    }
     audios.set(url, audio);
   }
   return audio;
@@ -146,14 +159,9 @@ function ensureAudio(url: string): HTMLAudioElement | null {
  * subscriber that re-mounts during a route change resumes mid-track
  * instead of restarting from 0:00.
  */
-function reconcile(url: string): void {
+function startFade(url: string, target: number): void {
   const audio = audios.get(url);
   if (!audio) return;
-
-  const set = subscribers.get(url);
-  const wantsActive = !!set && Array.from(set).some((s) => s.active);
-  const { volume, muted } = getSettings();
-  const target = wantsActive && !muted ? volume : 0;
 
   if (target > 0) {
     void audio.play().catch(() => {
@@ -176,13 +184,63 @@ function reconcile(url: string): void {
     if (pct >= 1) {
       clearInterval(interval);
       fadeTimers.delete(url);
-      // Note: deliberately NOT calling audio.pause() at silence. The element
-      // keeps running at volume 0; this preserves currentTime across route
-      // hand-offs and avoids cold-start glitches. Cost is negligible — one
-      // mp3 decoder running at zero gain.
+      // Deliberately NOT calling audio.pause() at silence. The element keeps
+      // running at volume 0 so a sibling mount during a route hand-off
+      // resumes mid-track instead of cold-starting.
     }
   }, FADE_TICK_MS);
   fadeTimers.set(url, interval);
+}
+
+function reconcile(url: string): void {
+  const audio = audios.get(url);
+  if (!audio) return;
+
+  const set = subscribers.get(url);
+  const wantsActive = !!set && Array.from(set).some((s) => s.active);
+  const { volume, muted } = getSettings();
+  const target = wantsActive && !muted ? volume : 0;
+
+  // Debug-only window snapshot — lets us inspect the pool from playwright /
+  // devtools without having to read React state. Cheap, idempotent, and
+  // invisible to production users (no UI, no behavior change).
+  if (typeof window !== 'undefined') {
+    const debugStore = (window as unknown as { __velvetAmbient?: Record<string, unknown> });
+    debugStore.__velvetAmbient = debugStore.__velvetAmbient ?? {};
+    (debugStore.__velvetAmbient as Record<string, unknown>)[url] = {
+      subscribers: set ? set.size : 0,
+      activeSubs: set ? Array.from(set).filter((s) => s.active).length : 0,
+      wantsActive,
+      master: { volume, muted },
+      target,
+      currentVolume: audio.volume,
+      paused: audio.paused,
+    };
+  }
+
+  // Cancel any scheduled silence — we'll either reschedule it below if we
+  // still want to fade out, or skip it entirely if a new subscriber claimed
+  // the track within the grace window.
+  const pending = pendingSilence.get(url);
+  if (pending) {
+    clearTimeout(pending);
+    pendingSilence.delete(url);
+  }
+
+  if (target > 0) {
+    // Active: fade in immediately. Cancels any in-flight fade-out.
+    startFade(url, target);
+  } else {
+    // Inactive: fade out, but only if no subscriber claims the track within
+    // SILENCE_GRACE_MS. This absorbs React Strict Mode's mount→cleanup→mount
+    // double-invocation and Next.js route hand-offs cleanly — the fade
+    // never starts in the first place, so audio plays seamlessly.
+    const t = setTimeout(() => {
+      pendingSilence.delete(url);
+      startFade(url, 0);
+    }, SILENCE_GRACE_MS);
+    pendingSilence.set(url, t);
+  }
 }
 
 /* ------------------------------------------------------------------ */
