@@ -153,4 +153,14 @@ export const T = {
     musicOn: 'Müzik açık',
     musicOff: 'Müzik kapalı',
   },
+
+  audio: {
+    settings: 'Ses Ayarları',
+    ambient: 'Atmosfer Müziği',
+    sfx: 'Ses Efektleri',
+    mute: 'Sustur',
+    unmute: 'Aç',
+    open: 'Ses ayarları',
+    close: 'Kapat',
+  },
 } as const;

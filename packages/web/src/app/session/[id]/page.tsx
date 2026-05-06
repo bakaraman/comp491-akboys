@@ -27,6 +27,9 @@ import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
+import { SettingsPopover } from '@/components/SettingsPopover';
+import { useAmbientLoop } from '@/hooks/useAmbientLoop';
+import { useUiClickSound } from '@/lib/uiClick';
 import { authEnabled, getAuthHeaders, subscribeToAuth } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
@@ -126,6 +129,24 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [openingDismissed, setOpeningDismissed] = useState(false);
+
+  /* ---- A.2: Audio side effects ----
+   * Three independent ambient layers must never overlap:
+   *   - lobby ambient (this hook): pre-game phase
+   *   - cinematic ambient (managed by Opening/FinaleCinematic, untouched):
+   *     plays under TTS during opening + finale overlays
+   *   - in-game ambient (this hook): mid-game between cinematics
+   * The booleans below derive from existing render conditions further down
+   * so the audio state machine is the single source of truth for the page.
+   */
+  useUiClickSound();
+  const cinematicMounted =
+    (mp.gameState === 'playing' && !!mp.worldMeta && !openingDismissed && !mp.gameOver)
+    || !!mp.gameOver;
+  const lobbyAmbientActive = mp.gameState === 'lobby' || mp.gameState === 'voting';
+  const inGameAmbientActive = mp.gameState === 'playing' && openingDismissed && !mp.gameOver;
+  useAmbientLoop('/ambient/ambient-lobby.mp3', lobbyAmbientActive && !cinematicMounted);
+  useAmbientLoop('/ambient/ambient-game.mp3', inGameAmbientActive && !cinematicMounted);
 
   /* ---- Pre-fetch opening narration TTS as soon as story is ready ---- */
   const [openingTtsUrl, setOpeningTtsUrl] = useState<string | null>(null);
@@ -365,6 +386,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CopyLinkButton compact />
+          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted */}
+          <SettingsPopover />
           {/* Communication button */}
           <button
             onClick={() => setCommOpen(true)}

@@ -16,6 +16,9 @@ import { AuthGuard } from '@/components/AuthGuard';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
 import { ProfileButton } from '@/components/ProfileButton';
+import { SettingsPopover } from '@/components/SettingsPopover';
+import { useAmbientLoop } from '@/hooks/useAmbientLoop';
+import { useUiClickSound } from '@/lib/uiClick';
 import { authEnabled, signOutUser, getAuthHeaders } from '@/lib/firebase';
 import { T } from '@/lib/tr';
 
@@ -28,6 +31,10 @@ export default function HomePage() {
   const [roomCode, setRoomCode] = useState('');
   const [loadingAction, setLoadingAction] = useState<null | 'create' | 'join'>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // A.2: Lobby ambient music on the landing page + global UI click sound.
+  useUiClickSound();
+  useAmbientLoop('/ambient/ambient-lobby.mp3', true);
 
   async function handleSignOut() {
     clearName();
@@ -132,6 +139,12 @@ export default function HomePage() {
         )}
 
         {name && <ProfileButton name={name} onNameChange={setName} onSignOut={handleSignOut} />}
+
+        {/* A.2: Audio settings — fixed top-left so it never collides with
+            ProfileButton (top-right) regardless of name length. */}
+        <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
+          <SettingsPopover />
+        </div>
 
         <div style={{ width: '100%', maxWidth: '560px', textAlign: 'center' }}>
           {/* Title */}
