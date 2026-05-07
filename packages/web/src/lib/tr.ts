@@ -93,6 +93,26 @@ export const T = {
     noMessages: 'Henüz bir mesaj yok',
   },
 
+  evidence: {
+    title: 'Kanıt Tahtası',
+    subtitle: 'Takımın paylaşılan notları',
+    placeholder: 'Bir kanıt veya düşünce paylaş…',
+    noMessages: 'Henüz bir not yok. İlk düşünceyi sen paylaş.',
+    send: 'Gönder',
+  },
+
+  voice: {
+    section: 'Sesli Sohbet',
+    hotkeyHint: 'Konuşmak için V tuşunu basılı tut.',
+    input: 'Mikrofon',
+    output: 'Hoparlör',
+    systemDefault: 'Sistem varsayılanı',
+    ready: 'Hazır',
+    connecting: 'Bağlanıyor…',
+    denied: 'İzin yok',
+    unsupported: 'Desteklenmiyor',
+  },
+
   accuse: {
     title: 'Suçlama Öner',
     subtitle: 'Kimin yaptığını düşünüyorsun ve hangi kanıtla?',

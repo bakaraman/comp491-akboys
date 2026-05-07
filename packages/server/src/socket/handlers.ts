@@ -49,6 +49,7 @@ import {
   generateWorld,
   generateOpeningImageFromPrompt,
 } from '../world/index.js';
+import { setupVoiceHandlers, leaveVoice } from './voice-handlers.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -529,6 +530,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
   io.on('connection', (socket: GameSocket) => {
     console.log(`[socket] connected: ${socket.id}`);
 
+    /* ---- Voice chat signaling (V-key walkie-talkie, #48) ---- */
+    setupVoiceHandlers(io, socket);
+
     /* ---- player:join ---- */
     socket.on('player:join', (data, callback) => {
       const { sessionId, playerName } = data;
@@ -713,22 +717,29 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /*  COMMUNICATION HANDLERS (separate from narrator pipeline)        */
     /* ================================================================ */
 
-    /* ---- comm:room — message to all players in sender's room ---- */
-    socket.on('comm:room', (data) => {
-      const { sessionId, playerId, content } = data;
+    /**
+     * Evidence Board (Velvet Shadow v2): comm:room and comm:direct now both
+     * broadcast to every connected player in the session. The original
+     * room-only / direct-only distinction was retired when the team chat
+     * was repurposed as a shared notepad for evidence theories. Wire
+     * protocol kept the same so older clients still work.
+     */
+    function broadcastEvidenceNote(
+      sessionId: string,
+      playerId: string,
+      content: string,
+    ): void {
       const session = store.get(sessionId);
       if (!session) return;
 
       const player = store.getPlayer(sessionId, playerId);
       if (!player) return;
 
-      // Compute audience snapshot: all players in the same room right now
-      const roomAudience: string[] = [playerId]; // sender always sees it
+      const audience: string[] = [];
       for (const p of session.players.values()) {
-        if (p.id !== playerId && p.currentRoomId === player.currentRoomId && p.isConnected) {
-          roomAudience.push(p.id);
-        }
+        if (p.isConnected) audience.push(p.id);
       }
+      if (!audience.includes(playerId)) audience.push(playerId);
 
       const msg: CommMessageDTO = {
         id: uuidv4(),
@@ -739,70 +750,31 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         timestamp: Date.now(),
         mode: 'room',
         roomId: player.currentRoomId,
-        visibleTo: roomAudience,
+        visibleTo: audience,
       };
 
-      // Store in comm history
       session.commHistory.push(msg);
       session.lastActivityAt = Date.now();
       void store.sync(sessionId);
 
-      // Send to audience sockets
       const targetSids = new Set<string>();
-      for (const pid of roomAudience) {
+      for (const pid of audience) {
         for (const sid of findSocketsForPlayer(pid)) targetSids.add(sid);
       }
       for (const sid of targetSids) {
         io.to(sid).emit('comm:message', msg);
       }
 
-      console.log(`[comm:room] ${player.name} in ${player.currentRoomId}: "${content.slice(0, 40)}"`);
+      console.log(`[evidence-board] ${player.name}: "${content.slice(0, 40)}" (audience ${audience.length})`);
+    }
+
+    socket.on('comm:room', (data) => {
+      broadcastEvidenceNote(data.sessionId, data.playerId, data.content);
     });
 
-    /* ---- comm:direct — targeted message to a specific player ---- */
     socket.on('comm:direct', (data) => {
-      const { sessionId, playerId, targetPlayerId, content } = data;
-      const session = store.get(sessionId);
-      if (!session) return;
-
-      const sender = store.getPlayer(sessionId, playerId);
-      if (!sender) return;
-
-      const target = store.getPlayer(sessionId, targetPlayerId);
-      if (!target) {
-        socket.emit('session:error', { message: 'Target player not found' });
-        return;
-      }
-
-      const msg: CommMessageDTO = {
-        id: uuidv4(),
-        senderId: playerId,
-        senderName: sender.name,
-        senderColor: sender.color,
-        content: content.trim(),
-        timestamp: Date.now(),
-        mode: 'direct',
-        targetPlayerId,
-        targetPlayerName: target.name,
-        roomId: sender.currentRoomId,
-        visibleTo: [playerId, targetPlayerId],
-      };
-
-      // Store in comm history
-      session.commHistory.push(msg);
-      session.lastActivityAt = Date.now();
-      void store.sync(sessionId);
-
-      // Send to sender + target only
-      const targetSids = new Set<string>();
-      for (const sid of findSocketsForPlayer(playerId)) targetSids.add(sid);
-      for (const sid of findSocketsForPlayer(targetPlayerId)) targetSids.add(sid);
-
-      for (const sid of targetSids) {
-        io.to(sid).emit('comm:message', msg);
-      }
-
-      console.log(`[comm:direct] ${sender.name} -> ${target.name}: "${content.slice(0, 40)}"`);
+      // Direct distinction retired — broadcast to the whole session.
+      broadcastEvidenceNote(data.sessionId, data.playerId, data.content);
     });
 
     /* ================================================================ */
@@ -1299,6 +1271,13 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       const player = store.getPlayer(sessionId, playerId);
       if (!player) return;
+
+      // Voice cleanup: if no other socket of this player remains, remove
+      // them from the voice mesh so peers tear down their connections.
+      // (Multi-tab still keeps voice alive on the other tabs.)
+      if (findSocketsForPlayer(playerId).length === 0) {
+        leaveVoice(io, sessionId, playerId);
+      }
 
       // If the player has ANOTHER socket still open (multi-tab), don't mark
       // them as disconnected at all.

@@ -24,6 +24,7 @@ import { T } from '@/lib/tr';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
+import { useVoiceChat } from '@/hooks/useVoiceChat';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
@@ -110,6 +111,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
+
+  /* ---- Voice chat (#48) — V-key walkie-talkie mesh ---- */
+  const voice = useVoiceChat({
+    sessionId,
+    myPlayerId: mp.myPlayerId,
+    enabled: isMultiplayer && mp.gameState === 'playing',
+  });
 
   /* Music lives only inside OpeningCinematic + FinaleCinematic overlays */
 
@@ -386,12 +394,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CopyLinkButton compact />
-          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted */}
-          <SettingsPopover />
-          {/* Communication button */}
+          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted.
+              #48: Voice section is wired in session pages so users can pick
+              their mic/speaker; on home/lobby pages SettingsPopover is
+              rendered without `voice` and the Voice section is hidden. */}
+          <SettingsPopover voice={voice} />
+          {/* Evidence Board button (#48 — repurposed from old comm panel) */}
           <button
             onClick={() => setCommOpen(true)}
-            title="Communication"
+            title={T.evidence.title}
             style={{
               position: 'relative', display: 'flex', alignItems: 'center', gap: '5px',
               padding: '6px 12px', backgroundColor: 'transparent',
@@ -399,18 +410,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               color: '#6a6050', fontSize: '11px', fontFamily: 'monospace',
               letterSpacing: '0.5px', cursor: 'pointer', transition: 'all 0.2s',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#5ba3cf'; e.currentTarget.style.color = '#5ba3cf'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d4a843'; e.currentTarget.style.color = '#d4a843'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
           >
+            {/* Clipboard / pinboard glyph */}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <rect x="4" y="4" width="16" height="18" rx="2" />
+              <path d="M9 4h6v3H9z" />
+              <line x1="8" y1="11" x2="16" y2="11" />
+              <line x1="8" y1="15" x2="14" y2="15" />
             </svg>
-            Chat
+            {T.evidence.title}
             {mp.unreadComm > 0 && (
               <span style={{
                 position: 'absolute', top: '-4px', right: '-4px',
                 width: '16px', height: '16px', borderRadius: '50%',
-                backgroundColor: '#5ba3cf', color: '#0a0a0a',
+                backgroundColor: '#d4a843', color: '#0a0a0a',
                 fontSize: '9px', fontWeight: 'bold',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
@@ -500,7 +515,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       <ChatInput onSend={mp.sendAction} onTypingChange={mp.sendTyping} playerName={myPlayer?.name} />
 
-      <PlayerSidebar players={mp.players} myPlayerId={mp.myPlayerId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <PlayerSidebar
+        players={mp.players}
+        myPlayerId={mp.myPlayerId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        talkingPlayerIds={voice.talkingPeerIds}
+        selfTransmitting={voice.isTransmitting}
+      />
 
       <CommPanel
         isOpen={commOpen}

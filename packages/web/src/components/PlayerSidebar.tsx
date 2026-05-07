@@ -18,9 +18,20 @@ interface PlayerSidebarProps {
   myPlayerId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /** Player ids who are currently transmitting voice (#48). */
+  talkingPlayerIds?: Set<string>;
+  /** True when the local user is holding V to transmit (#48). */
+  selfTransmitting?: boolean;
 }
 
-export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSidebarProps) {
+export function PlayerSidebar({
+  players,
+  myPlayerId,
+  isOpen,
+  onClose,
+  talkingPlayerIds,
+  selfTransmitting,
+}: PlayerSidebarProps) {
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
@@ -101,6 +112,9 @@ export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSi
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
           {players.map((player) => {
             const isMe = player.id === myPlayerId;
+            const isTalking = isMe
+              ? Boolean(selfTransmitting)
+              : Boolean(talkingPlayerIds?.has(player.id));
             return (
               <div
                 key={player.id}
@@ -118,17 +132,36 @@ export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSi
                   display: 'flex', alignItems: 'center', gap: '10px',
                   marginBottom: '12px',
                 }}>
-                  {/* Avatar circle */}
+                  {/* Avatar circle (with green ring when transmitting #48) */}
                   <div style={{
-                    width: '36px', height: '36px', borderRadius: '50%',
-                    backgroundColor: player.isConnected ? player.color : '#3a3530',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '15px', fontWeight: 'bold', color: '#0a0a0a',
+                    position: 'relative',
+                    width: '36px', height: '36px',
                     flexShrink: 0,
-                    border: isMe ? '2px solid #e8e0d4' : '2px solid transparent',
-                    opacity: player.isConnected ? 1 : 0.5,
                   }}>
-                    {player.name.charAt(0).toUpperCase()}
+                    {isTalking && (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          inset: '-4px',
+                          borderRadius: '50%',
+                          border: '2px solid #4ade80',
+                          boxShadow: '0 0 8px rgba(74,222,128,0.6)',
+                          animation: 'voice-talking-pulse 1s ease-in-out infinite',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    )}
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '50%',
+                      backgroundColor: player.isConnected ? player.color : '#3a3530',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '15px', fontWeight: 'bold', color: '#0a0a0a',
+                      border: isMe ? '2px solid #e8e0d4' : '2px solid transparent',
+                      opacity: player.isConnected ? 1 : 0.5,
+                    }}>
+                      {player.name.charAt(0).toUpperCase()}
+                    </div>
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -174,6 +207,13 @@ export function PlayerSidebar({ players, myPlayerId, isOpen, onClose }: PlayerSi
           })}
         </div>
       </div>
+
+      <style>{`
+        @keyframes voice-talking-pulse {
+          0%, 100% { opacity: 0.65; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.06); }
+        }
+      `}</style>
     </>
   );
 }

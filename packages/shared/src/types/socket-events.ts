@@ -171,6 +171,33 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string; hostPrompt: string },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+
+  /* ---- Voice chat (V-key walkie-talkie, WebRTC mesh) ---- */
+  /** Client signals it wants to join the voice mesh for a session */
+  'voice:join': (data: { sessionId: string; playerId: string }) => void;
+  /** Client withdraws from voice (also fires implicitly on disconnect) */
+  'voice:leave': (data: { sessionId: string; playerId: string }) => void;
+  /** WebRTC offer relayed to a specific peer */
+  'voice:offer': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  /** WebRTC answer relayed to a specific peer */
+  'voice:answer': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  /** ICE candidate relayed to a specific peer */
+  'voice:ice-candidate': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    candidate: { candidate: string; sdpMid: string | null; sdpMLineIndex: number | null } | null;
+  }) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -359,6 +386,29 @@ export interface ServerToClientEvents {
   'turn:updated': (data: {
     turnCount: number;
     maxTurns: number;
+  }) => void;
+
+  /* ---- Voice chat (V-key walkie-talkie) ---- */
+  /** Sent to a freshly-joined peer with the current voice participant list */
+  'voice:participants': (data: { peerIds: string[] }) => void;
+  /** Broadcast to existing voice participants when someone joins */
+  'voice:peer-joined': (data: { peerId: string }) => void;
+  /** Broadcast to existing voice participants when someone leaves/disconnects */
+  'voice:peer-left': (data: { peerId: string }) => void;
+  /** WebRTC offer relayed from another peer */
+  'voice:offer': (data: {
+    fromPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  /** WebRTC answer relayed from another peer */
+  'voice:answer': (data: {
+    fromPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  /** ICE candidate relayed from another peer */
+  'voice:ice-candidate': (data: {
+    fromPlayerId: string;
+    candidate: { candidate: string; sdpMid: string | null; sdpMLineIndex: number | null } | null;
   }) => void;
 }
 

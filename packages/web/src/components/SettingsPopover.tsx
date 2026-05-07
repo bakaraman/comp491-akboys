@@ -118,6 +118,16 @@ function ChannelRow({ label, volume, onVolumeChange, muted, onToggleMute }: Chan
 /*  Main popover                                                       */
 /* ------------------------------------------------------------------ */
 
+export interface VoiceSettingsSlice {
+  status: 'idle' | 'connecting' | 'ready' | 'denied' | 'unsupported';
+  inputDevices: MediaDeviceInfo[];
+  outputDevices: MediaDeviceInfo[];
+  selectedInputId: string | null;
+  selectedOutputId: string | null;
+  setSelectedInputId: (id: string | null) => void;
+  setSelectedOutputId: (id: string | null) => void;
+}
+
 export interface SettingsPopoverProps {
   /**
    * Which side of the trigger button the popover panel anchors to.
@@ -128,9 +138,11 @@ export interface SettingsPopoverProps {
    *   rightward. Use when the trigger sits near the left edge.
    */
   align?: 'left' | 'right';
+  /** Optional voice-chat slice — when present, the Voice section is rendered. */
+  voice?: VoiceSettingsSlice;
 }
 
-export function SettingsPopover({ align = 'right' }: SettingsPopoverProps): React.ReactElement {
+export function SettingsPopover({ align = 'right', voice }: SettingsPopoverProps): React.ReactElement {
   const ambient = useAmbientSettings();
   const sfx = useSoundEffects();
   const [open, setOpen] = useState(false);
@@ -230,8 +242,123 @@ export function SettingsPopover({ align = 'right' }: SettingsPopoverProps): Reac
             muted={sfx.muted}
             onToggleMute={sfx.toggleMute}
           />
+
+          {voice && <VoiceSection voice={voice} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Voice section (#48)                                                */
+/* ------------------------------------------------------------------ */
+
+function VoiceSection({ voice }: { voice: VoiceSettingsSlice }): React.ReactElement {
+  const statusLabel = (() => {
+    switch (voice.status) {
+      case 'ready': return T.voice.ready;
+      case 'connecting': return T.voice.connecting;
+      case 'denied': return T.voice.denied;
+      case 'unsupported': return T.voice.unsupported;
+      default: return '';
+    }
+  })();
+
+  const statusColor = voice.status === 'ready' ? '#4ade80'
+    : voice.status === 'connecting' ? '#d4a843'
+    : voice.status === 'denied' || voice.status === 'unsupported' ? '#cf5b5b'
+    : '#5a5040';
+
+  return (
+    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #2a2520' }}>
+      <div style={{
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#b0a080',
+        letterSpacing: '1px',
+        textTransform: 'uppercase',
+        marginBottom: '8px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+      }}>
+        <span>{T.voice.section}</span>
+        {statusLabel && (
+          <span style={{ color: statusColor, fontSize: '10px' }}>{statusLabel}</span>
+        )}
+      </div>
+
+      <div style={{ fontSize: '10px', color: '#6a6050', marginBottom: '10px', fontFamily: 'monospace' }}>
+        {T.voice.hotkeyHint}
+      </div>
+
+      {/* Input device */}
+      <DevicePicker
+        label={T.voice.input}
+        devices={voice.inputDevices}
+        selectedId={voice.selectedInputId}
+        onSelect={voice.setSelectedInputId}
+        disabled={voice.status === 'unsupported'}
+      />
+
+      {/* Output device */}
+      <DevicePicker
+        label={T.voice.output}
+        devices={voice.outputDevices}
+        selectedId={voice.selectedOutputId}
+        onSelect={voice.setSelectedOutputId}
+        disabled={voice.status === 'unsupported' || voice.outputDevices.length === 0}
+      />
+    </div>
+  );
+}
+
+interface DevicePickerProps {
+  label: string;
+  devices: MediaDeviceInfo[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  disabled?: boolean;
+}
+
+function DevicePicker({ label, devices, selectedId, onSelect, disabled }: DevicePickerProps): React.ReactElement {
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <label style={{
+        display: 'block',
+        fontSize: '10px',
+        color: '#8a8070',
+        fontFamily: 'monospace',
+        marginBottom: '4px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+      }}>
+        {label}
+      </label>
+      <select
+        value={selectedId ?? ''}
+        onChange={(e) => onSelect(e.target.value || null)}
+        disabled={disabled}
+        style={{
+          width: '100%',
+          padding: '6px 8px',
+          backgroundColor: '#0a0a0a',
+          border: '1px solid #2a2520',
+          borderRadius: '4px',
+          color: disabled ? '#3a3530' : '#c8c0b4',
+          fontFamily: 'monospace',
+          fontSize: '11px',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        <option value="">{T.voice.systemDefault}</option>
+        {devices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label || `${label} (${d.deviceId.slice(0, 8)})`}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
