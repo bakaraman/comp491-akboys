@@ -279,12 +279,26 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
         if (!audio) {
           audio = document.createElement('audio');
           audio.autoplay = true;
+          audio.setAttribute('playsinline', 'true');
           audio.dataset.voicePeerId = remotePlayerId;
           audio.style.display = 'none';
           document.body.appendChild(audio);
           remoteAudiosRef.current.set(remotePlayerId, audio);
         }
         audio.srcObject = stream;
+        // Explicit play() — some browsers do not honour the autoplay
+        // attribute when srcObject is set programmatically after the
+        // element is created. If autoplay policy blocks, we surface it.
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch((err) => {
+            console.warn(`${DEBUG} audio.play() blocked for peer ${remotePlayerId.slice(0, 6)}:`, err?.name ?? err);
+          });
+        }
+        // Resume the AudioContext if suspended (Chrome's autoplay rules).
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => { /* user gesture may be needed */ });
+        }
 
         // Apply speaker device if user picked one and the browser supports it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
