@@ -327,7 +327,7 @@ export function TutorialOverlay({
             {T.tutorial.stepOf.replace('{n}', String(stepIndex + 1)).replace('{total}', String(total))}
           </span>
           <span style={{ display: 'flex', gap: '4px' }}>
-            {steps.map((_, i) => (
+            {stepsToUse.map((_, i) => (
               <span
                 key={i}
                 style={{
