@@ -15,6 +15,7 @@
 import type { Scenario, PlayerAction, WorldStateEvent, WorldData } from '@akboys/shared';
 import type { SessionData } from '../store/SessionStore.js';
 import type { SceneContext } from '../middleware/openai.js';
+import { getStyleGuide } from '../world/genre-style.js';
 
 /* ------------------------------------------------------------------ */
 /*  Directive types                                                    */
@@ -93,7 +94,7 @@ export function buildPlayerActionPrompt(
     })
     .join('\n');
 
-  // Rich NPC context — pull alibi/knownInfo/hiddenSecret/personality from
+  // Rich NPC context — pull alibi/backstory/knownInfo/hiddenSecret/personality from
   // the original WorldData when available. This is narrator-only context;
   // it never gets broadcast to players verbatim.
   const npcList = scenario.npcs
@@ -106,16 +107,29 @@ export function buildPlayerActionPrompt(
       const lines = [
         `- ${n.name} (${n.id}, in ${w.roomId}) role=${w.role} mood=${w.personality}${culpritFlag}`,
         `    description: ${w.description}`,
-        `    alibi they say out loud: "${w.alibiClaim}"`,
+        `    backstory: ${w.backstory}`,
+        `    alibi location: "${w.alibi.claimedLocation}"`,
+        `    alibi activity: "${w.alibi.claimedActivity}"`,
+        `    alibi short: "${w.alibiClaim}"`,
         `    what they ACTUALLY know (hide unless pressed hard): ${w.knownInfo}`,
       ];
+      if (w.alibi.inconsistency) {
+        lines.push(`    alibi inconsistency [culprit flaw, never reveal directly]: ${w.alibi.inconsistency}`);
+      }
       if (w.hiddenSecret) lines.push(`    their hidden secret: ${w.hiddenSecret}`);
       return lines.join('\n');
     })
     .join('\n\n');
 
   const itemList = scenario.items
-    .map((i) => `- ${i.name} (${i.id}, in ${i.roomId}): ${i.description}${i.isEvidence ? ' [evidence — points toward culprit]' : ''}`)
+    .map((i) => {
+      const w = world?.items.find((x) => x.id === i.id);
+      const isRedHerring = w?.isRedHerring ?? false;
+      const tag = isRedHerring
+        ? ' [RED HERRING — looks like evidence but is NOT the key clue; present as suspicious, never confirm as the answer]'
+        : i.isEvidence ? ' [evidence — points toward culprit]' : '';
+      return `- ${i.name} (${i.id}, in ${i.roomId}): ${i.description}${tag}`;
+    })
     .join('\n');
 
   const players = Array.from(session.players.values());
@@ -128,7 +142,14 @@ export function buildPlayerActionPrompt(
     ? `\nRECENT EVENTS (chronological, latest last):\n${recentLog.join('\n')}\n`
     : '';
 
-  return `You are the narrator of a live multiplayer noir mystery: "${scenario.title}".
+  // Genre voice — inject style guide's narrator rules if genre was detected
+  const genre = session.detectedGenre ?? 'generic';
+  const styleGuide = getStyleGuide(genre);
+  const genreVoiceBlock = genre !== 'generic'
+    ? `\nGENRE VOICE (${genre}): ${styleGuide.narratorVoiceRules}\n`
+    : '';
+
+  return `You are the narrator of a live multiplayer mystery: "${scenario.title}".
 Setting: ${scenario.setting}
 
 ROOMS:
@@ -156,12 +177,14 @@ RESPONSE RULES:
 - WRITE IN TURKISH. Clear, direct, natural prose. **Normal bir anlatıcı gibi anlat.** Address the player as "sen".
 - 1-2 short paragraphs, maximum 4-5 sentences. No literary flourishes, no poetic metaphors, no "edebi" heavy style.
 - Every sentence should move the story forward with a concrete fact, observation, or action. If it's filler, cut it.
-- Short sentences. Plain, readable Turkish. Think factual detective narration, not Orhan Pamuk.
+- Short sentences. Plain, readable Turkish.
 - Use markdown lightly: **bold** for names/places, > blockquote for NPC dialogue, ## headings only when entering a NEW room.
 - When an NPC speaks, put their exact words in a blockquote. Liars lie; the culprit MUST NOT confess.
+- NPCs should reveal their alibis when pressed — voiced naturally from their backstory and personality.
 - If the player picks something up or moves, state it plainly ("eldivenini cebine koydun", "bara doğru yürüyorsun").
 - If action is impossible or an NPC refuses, say so directly without decoration.
-
+- For RED HERRING items: present them as intriguing and suspicious, but NEVER confirm them as the definitive key clue.
+${genreVoiceBlock}
 NPC NAMING RULE (important):
 - Always write an NPC's role before their name so the player immediately knows who they are. Examples:
   * "**başhemşire Feride Aksu**" (not just "Feride Aksu")

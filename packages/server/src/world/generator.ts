@@ -13,6 +13,7 @@
 import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
 import { WorldSchema, type WorldData, getFallbackWorld } from '@akboys/shared';
+import { detectGenre, getStyleGuide, type GenreTag } from './genre-style.js';
 
 let _client: OpenAI | null = null;
 function client(): OpenAI {
@@ -33,7 +34,7 @@ const DEBUG = '[world-gen]';
 /* ------------------------------------------------------------------ */
 
 function buildSystemPrompt(playerCount: number): string {
-  return `You are a noir mystery generator. Create a complete, playable detective story for ${playerCount} detective players. Output must match the JSON schema exactly.
+  return `You are a mystery generator. Create a complete, playable detective story for ${playerCount} detective players. Output must match the JSON schema exactly.
 
 STRUCTURAL RULES:
 - Create EXACTLY ${playerCount + 2} rooms. Graph should be navigable.
@@ -49,23 +50,34 @@ CRITICAL EXIT RULES:
 - Exits are HINTS — the narrator has final movement authority at runtime.
 - Still, prefer bidirectional exits (A.north=B → B.south=A) and a connected graph for sensible navigation.
 
-OPENING NARRATION (important — this is the only scene-setting text the player sees):
-- 4-6 Turkish sentences. Clear, natural prose. No bullet points, no headings. **Not literary — normal anlatıcı tonu.**
-- Bake in era + location + mood naturally (e.g. "1947 sonbaharı. Yağmurlu bir yatılı okul. Gece yarısı, çan kulesinden bir çığlık yankılandı.") rather than stating them like labels.
-- Each sentence drops a concrete fact. No poetic metaphors, no ornamental phrases.
-- Write for the ear — TTS will read it.
+RED HERRINGS (REQUIRED — at least 1 per world):
+- At LEAST 1 item must have isRedHerring: true. This item looks suspicious and evidence-like but is NOT the real key clue.
+- Accusing the culprit with a red herring item as the "key evidence" fails — it is a deliberate misdirection.
+- All other items must have isRedHerring: false.
+- The red herring should be physically close to the crime scene or connected to an innocent NPC's hidden secret.
+
+ALIBI RULES (REQUIRED — every NPC must have a complete alibi object):
+- Every NPC must have alibi.claimedLocation and alibi.claimedActivity filled in Turkish.
+- alibi.corroboratedBy: name of an NPC who can confirm it (or null if alone).
+- alibi.inconsistency: CULPRIT ONLY — a specific, player-discoverable contradiction (e.g. "claims to have been in the garden, but the groundskeeper locked the gate at 22:30"). Leave null for innocent NPCs.
+- alibiClaim: a short Turkish summary of the alibi (used in quick references).
+- Style: NPCs should reveal their alibis under pressure; the alibi must feel personal and drawn from their backstory.
+
+BACKSTORY RULES (REQUIRED — every NPC must have a backstory):
+- Every NPC must have backstory: 2-3 Turkish sentences of personal history.
+- Each backstory must be distinct enough that the narrator's voice for that character feels different.
+- The backstory should hint at the NPC's personality without directly stating it.
 
 KILLER AMBIGUITY (essential for a good mystery):
 - EVERY NPC (innocent or guilty) must have:
   * Surface-level suspicious behavior (lies in alibiClaim, nervous tics in description)
   * A plausible-seeming motive
-  * A "red herring" pointing misleadingly at them
 - Innocent NPCs hide UNRELATED secrets (affairs, small theft, shame, debt) — use hiddenSecret.
 - knownInfo is what the NPC ACTUALLY knows (narrator's eyes only — used to make them lie convincingly).
 - The player should suspect 2-3 NPCs until the narrative deduces the real answer.
 
 LANGUAGE (STRICT):
-- ALL player-facing text MUST be in Turkish: room names + descriptions, NPC names + roles + descriptions, narrativeHooks, openingNarration, alibiClaim, knownInfo, hiddenSecret, item names + descriptions, solution.motiveShort.
+- ALL player-facing text MUST be in Turkish: room names + descriptions, NPC names + roles + descriptions, narrativeHooks, openingNarration, alibiClaim, alibi fields, backstory, knownInfo, hiddenSecret, item names + descriptions, solution.motiveShort.
 - Technical IDs (snake_case English): room.id, npc.id, item.id, roomId refs, keyEvidenceId, culpritNpcId.
 - imagePrompt, portraitPrompt, visualStylePrompt, openingImagePrompt: English (for image generation).
 
@@ -81,9 +93,18 @@ VISUAL STYLE:
 - Each npc.portraitPrompt: head-and-shoulders portrait, period-appropriate, matches style.
 
 OPENING NARRATION:
-- 3-4 Turkish sentences, literary, for the ear (TTS will read it).
+- 4-6 Turkish sentences. Clear, natural prose. Bake in era + location + mood naturally. Write for the ear — TTS will read it.
 
 OUTPUT: Single JSON object matching the provided schema exactly.`;
+}
+
+function buildStyleAddition(genre: GenreTag): string {
+  const guide = getStyleGuide(genre);
+  if (genre === 'generic') return '';
+  return `\n\nGENRE STYLE (${genre.toUpperCase()}) — shape ALL generated content to this genre:
+ROOM DESCRIPTIONS: ${guide.roomDescriptionFlavor}
+NPC DIALOGUE PATTERNS: ${guide.npcDialoguePatterns}
+TONE: Apply this genre's atmosphere to room descriptions, NPC backstories, and opening narration.`;
 }
 
 function buildUserPrompt(hostPrompt: string, playerCount: number): string {
@@ -170,6 +191,12 @@ export function validateWorld(world: WorldData, expectedPlayerCount: number): Va
     errors.push(`Expected at least 2 evidence items, got ${evidenceCount}`);
   }
 
+  // 8. At least 1 red herring item
+  const redHerringCount = world.items.filter((i) => i.isRedHerring).length;
+  if (redHerringCount < 1) {
+    errors.push('Expected at least 1 red herring item (isRedHerring: true), got 0');
+  }
+
   return { valid: errors.length === 0, errors };
 }
 
@@ -187,6 +214,7 @@ export interface GenerateWorldResult {
   usedFallback: boolean;
   attempts: number;
   validationErrors?: string[];
+  genreTag: GenreTag;
 }
 
 async function callOpenAIOnce(
@@ -277,7 +305,12 @@ export async function generateWorld(
 ): Promise<GenerateWorldResult> {
   const { hostPrompt, playerCount } = opts;
   const clampedPC = Math.min(Math.max(playerCount, 2), 10);
-  const systemPrompt = buildSystemPrompt(clampedPC);
+
+  // Detect genre (keyword heuristic → LLM fallback if ambiguous)
+  const genreTag = await detectGenre(hostPrompt);
+  console.log(`${DEBUG} genre detected: ${genreTag}`);
+
+  const systemPrompt = buildSystemPrompt(clampedPC) + buildStyleAddition(genreTag);
   const userPrompt = buildUserPrompt(hostPrompt, clampedPC);
 
   let attempts = 0;
@@ -285,12 +318,12 @@ export async function generateWorld(
   // Attempt 1 — fresh
   try {
     attempts += 1;
-    console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, prompt=${hostPrompt.slice(0, 60)}`);
+    console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, genre=${genreTag}, prompt=${hostPrompt.slice(0, 60)}`);
     const world = await callOpenAIOnce(systemPrompt, userPrompt);
     const validation = validateWorld(world, clampedPC);
     if (validation.valid) {
       console.log(`${DEBUG} attempt 1: success`);
-      return { world, usedFallback: false, attempts };
+      return { world, usedFallback: false, attempts, genreTag };
     }
     console.warn(`${DEBUG} attempt 1 semantic errors:`, validation.errors);
 
@@ -302,7 +335,7 @@ export async function generateWorld(
     const validation2 = validateWorld(repaired, clampedPC);
     if (validation2.valid) {
       console.log(`${DEBUG} attempt 2: success`);
-      return { world: repaired, usedFallback: false, attempts };
+      return { world: repaired, usedFallback: false, attempts, genreTag };
     }
     console.error(`${DEBUG} attempt 2 still has errors:`, validation2.errors);
   } catch (err) {
@@ -311,5 +344,5 @@ export async function generateWorld(
 
   // Fallback
   console.warn(`${DEBUG} using hardcoded Velvet Shadow fallback`);
-  return { world: getFallbackWorld(clampedPC), usedFallback: true, attempts };
+  return { world: getFallbackWorld(clampedPC), usedFallback: true, attempts, genreTag };
 }

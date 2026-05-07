@@ -69,7 +69,21 @@ const WorldNpcSchema = z.object({
       + 'Head-and-shoulders, period-appropriate clothing, distinctive feature.',
   ),
   personality: NpcPersonalityEnum,
-  alibiClaim: z.string().describe('Turkish: what this NPC tells detectives they were doing.'),
+  alibiClaim: z.string().describe('Turkish: what this NPC tells detectives they were doing (short summary used in quick references).'),
+  alibi: z.object({
+    claimedLocation: z.string().describe('Turkish: specific location this NPC claims to have been.'),
+    claimedActivity: z.string().describe('Turkish: what this NPC claims to have been doing there.'),
+    corroboratedBy: z.string().nullable().describe('Turkish: name of the NPC who can corroborate this alibi, or null if none.'),
+    inconsistency: z.string().nullable().describe(
+      'For the CULPRIT: a specific, player-discoverable contradiction in this alibi '
+        + '(e.g. "claims the garden gate was open, but groundskeeper locked it at 21:00"). '
+        + 'For innocent NPCs: null.',
+    ),
+  }).describe('Structured alibi the NPC gives when interrogated. Narrator uses this to voice believable defenses.'),
+  backstory: z.string().describe(
+    'Turkish: 2-3 sentence personal history that shapes this character\'s voice. '
+      + 'Must be distinct enough that the narrator sounds different for each NPC.',
+  ),
   knownInfo: z.string().describe(
     'Turkish: what this NPC actually knows. Narrator context only — never revealed directly unless pressed.',
   ),
@@ -90,6 +104,12 @@ const WorldItemSchema = z.object({
   isEvidence: z.boolean().describe(
     'True if this item is meaningful evidence that points toward the culprit. '
       + 'Narrator context only — no pickup tracking at runtime.',
+  ),
+  isRedHerring: z.boolean().describe(
+    'True if this item is a deliberate false lead: looks suspicious and evidence-like, '
+      + 'but accusing the culprit with it as the key evidence fails. '
+      + 'AT LEAST 1 item per world must have isRedHerring: true. '
+      + 'Set to false for all other items.',
   ),
 });
 

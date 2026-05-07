@@ -118,7 +118,10 @@ function buildEventsPrompt(world: WorldData, worldStateLog: string[]): { system:
     .join('\n');
 
   const itemsBlock = world.items
-    .map((i) => `  • ${i.name}${i.isEvidence ? ' (KANIT)' : ''}`)
+    .map((i) => {
+      const tag = i.isRedHerring ? ' (YANILTICI KANIT)' : i.isEvidence ? ' (KANIT)' : '';
+      return `  • ${i.name}${tag}`;
+    })
     .join('\n');
 
   const logBlock = worldStateLog.length
@@ -135,6 +138,7 @@ GÖREVİN:
 - Katilin hareketleri (zehir koyma, kanıt yakma, kaçış) için isCulpritAction: true.
 - Ortam betimlemesi veya kurban'ın son anı gibi kişi-yok beat'ler için actorNpcId: "" (boş string).
 - Stil: kısa, somut, gazeteci raporu gibi. Süsleme yok. Pamuk değil.
+- DİKKAT: YANILTICI KANIT olarak işaretlenmiş eşyalar gerçek kanıt değil, dedektifleri şaşırtmak için konulmuş tuzaklardı. Bunları timeline'da gerekirse "bir yanlış yönlendirmeydi" olarak belirtebilirsin.
 
 İSİM KURALI (ÇOK ÖNEMLİ):
 - description alanlarında SADECE OKUNABILIR TÜRKÇE İSİMLER kullan.

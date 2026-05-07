@@ -113,6 +113,9 @@ export interface SessionData {
    * "Show Reconstruction" modal doesn't re-burn an LLM call.
    */
   reconstruction: ReconstructionDTO | null;
+
+  /** Genre detected from hostPrompt at world-generation time (Issue #2). */
+  detectedGenre?: string;
 }
 
 /** Contract every session store must satisfy */
