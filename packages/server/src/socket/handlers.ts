@@ -970,13 +970,16 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         const result = await generateWorld({ hostPrompt, playerCount });
         const worldMs = Date.now() - tWorldStart;
         store.setWorld(sessionId, result.world);
-        console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${result.world.meta.title}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback}`);
+        console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${result.world.meta.title}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback} genre=${result.genreTag}`);
         console.log(`[story ${sid}]   openingNarration: ${result.world.openingNarration.slice(0, 240)}...`);
         console.log(`[story ${sid}]   culprit: ${result.world.npcs.find((n) => n.isCulprit)?.name}`);
 
         // Also set scenarioId to our synthetic marker so downstream code knows.
         const sess = store.get(sessionId);
-        if (sess) sess.scenarioId = '__generated';
+        if (sess) {
+          sess.scenarioId = '__generated';
+          sess.detectedGenre = result.genreTag;
+        }
         void store.sync(sessionId);
 
         // Assign players to entry scenes BEFORE emitting story:ready

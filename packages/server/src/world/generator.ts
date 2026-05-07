@@ -13,6 +13,7 @@
 import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
 import { WorldSchema, type WorldData, getFallbackWorld } from '@akboys/shared';
+import { detectGenre, getStyleGuide, type GenreTag } from './genre-style.js';
 
 let _client: OpenAI | null = null;
 function client(): OpenAI {
@@ -95,6 +96,15 @@ OPENING NARRATION:
 - 4-6 Turkish sentences. Clear, natural prose. Bake in era + location + mood naturally. Write for the ear — TTS will read it.
 
 OUTPUT: Single JSON object matching the provided schema exactly.`;
+}
+
+function buildStyleAddition(genre: GenreTag): string {
+  const guide = getStyleGuide(genre);
+  if (genre === 'generic') return '';
+  return `\n\nGENRE STYLE (${genre.toUpperCase()}) — shape ALL generated content to this genre:
+ROOM DESCRIPTIONS: ${guide.roomDescriptionFlavor}
+NPC DIALOGUE PATTERNS: ${guide.npcDialoguePatterns}
+TONE: Apply this genre's atmosphere to room descriptions, NPC backstories, and opening narration.`;
 }
 
 function buildUserPrompt(hostPrompt: string, playerCount: number): string {
@@ -204,6 +214,7 @@ export interface GenerateWorldResult {
   usedFallback: boolean;
   attempts: number;
   validationErrors?: string[];
+  genreTag: GenreTag;
 }
 
 async function callOpenAIOnce(
@@ -294,7 +305,12 @@ export async function generateWorld(
 ): Promise<GenerateWorldResult> {
   const { hostPrompt, playerCount } = opts;
   const clampedPC = Math.min(Math.max(playerCount, 2), 10);
-  const systemPrompt = buildSystemPrompt(clampedPC);
+
+  // Detect genre (keyword heuristic → LLM fallback if ambiguous)
+  const genreTag = await detectGenre(hostPrompt);
+  console.log(`${DEBUG} genre detected: ${genreTag}`);
+
+  const systemPrompt = buildSystemPrompt(clampedPC) + buildStyleAddition(genreTag);
   const userPrompt = buildUserPrompt(hostPrompt, clampedPC);
 
   let attempts = 0;
@@ -302,12 +318,12 @@ export async function generateWorld(
   // Attempt 1 — fresh
   try {
     attempts += 1;
-    console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, prompt=${hostPrompt.slice(0, 60)}`);
+    console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, genre=${genreTag}, prompt=${hostPrompt.slice(0, 60)}`);
     const world = await callOpenAIOnce(systemPrompt, userPrompt);
     const validation = validateWorld(world, clampedPC);
     if (validation.valid) {
       console.log(`${DEBUG} attempt 1: success`);
-      return { world, usedFallback: false, attempts };
+      return { world, usedFallback: false, attempts, genreTag };
     }
     console.warn(`${DEBUG} attempt 1 semantic errors:`, validation.errors);
 
@@ -319,7 +335,7 @@ export async function generateWorld(
     const validation2 = validateWorld(repaired, clampedPC);
     if (validation2.valid) {
       console.log(`${DEBUG} attempt 2: success`);
-      return { world: repaired, usedFallback: false, attempts };
+      return { world: repaired, usedFallback: false, attempts, genreTag };
     }
     console.error(`${DEBUG} attempt 2 still has errors:`, validation2.errors);
   } catch (err) {
@@ -328,5 +344,5 @@ export async function generateWorld(
 
   // Fallback
   console.warn(`${DEBUG} using hardcoded Velvet Shadow fallback`);
-  return { world: getFallbackWorld(clampedPC), usedFallback: true, attempts };
+  return { world: getFallbackWorld(clampedPC), usedFallback: true, attempts, genreTag };
 }

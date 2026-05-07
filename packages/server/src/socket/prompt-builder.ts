@@ -15,6 +15,7 @@
 import type { Scenario, PlayerAction, WorldStateEvent, WorldData } from '@akboys/shared';
 import type { SessionData } from '../store/SessionStore.js';
 import type { SceneContext } from '../middleware/openai.js';
+import { getStyleGuide } from '../world/genre-style.js';
 
 /* ------------------------------------------------------------------ */
 /*  Directive types                                                    */
@@ -141,6 +142,13 @@ export function buildPlayerActionPrompt(
     ? `\nRECENT EVENTS (chronological, latest last):\n${recentLog.join('\n')}\n`
     : '';
 
+  // Genre voice — inject style guide's narrator rules if genre was detected
+  const genre = session.detectedGenre ?? 'generic';
+  const styleGuide = getStyleGuide(genre);
+  const genreVoiceBlock = genre !== 'generic'
+    ? `\nGENRE VOICE (${genre}): ${styleGuide.narratorVoiceRules}\n`
+    : '';
+
   return `You are the narrator of a live multiplayer mystery: "${scenario.title}".
 Setting: ${scenario.setting}
 
@@ -176,7 +184,7 @@ RESPONSE RULES:
 - If the player picks something up or moves, state it plainly ("eldivenini cebine koydun", "bara doğru yürüyorsun").
 - If action is impossible or an NPC refuses, say so directly without decoration.
 - For RED HERRING items: present them as intriguing and suspicious, but NEVER confirm them as the definitive key clue.
-
+${genreVoiceBlock}
 NPC NAMING RULE (important):
 - Always write an NPC's role before their name so the player immediately knows who they are. Examples:
   * "**başhemşire Feride Aksu**" (not just "Feride Aksu")
