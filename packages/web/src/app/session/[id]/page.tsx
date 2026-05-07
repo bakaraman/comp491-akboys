@@ -25,6 +25,7 @@ import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
+import { TutorialOverlay, hasSeenTutorial, clearTutorialSeen } from '@/components/TutorialOverlay';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
@@ -140,6 +141,32 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [openingDismissed, setOpeningDismissed] = useState(false);
+
+  /* ---- Tutorial overlay (#49) — show on first playing-state, replayable from Settings ---- */
+  const [tutorialVisible, setTutorialVisible] = useState(false);
+  const tutorialAutoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    // Auto-trigger once when gameplay UI becomes visible: gameState is
+    // 'playing' AND opening cinematic has been dismissed. The ref guard
+    // ensures we only auto-show once per page mount.
+    if (
+      mp.gameState === 'playing'
+      && openingDismissed
+      && !tutorialAutoTriggeredRef.current
+      && !hasSeenTutorial()
+    ) {
+      tutorialAutoTriggeredRef.current = true;
+      // Small delay so the cinematic fade-out finishes first.
+      const t = setTimeout(() => setTutorialVisible(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [isMultiplayer, mp.gameState, openingDismissed]);
+
+  const replayTutorial = useCallback(() => {
+    clearTutorialSeen();
+    setTutorialVisible(true);
+  }, []);
 
   /* ---- A.2: Audio side effects ----
    * Three independent ambient layers must never overlap:
@@ -378,6 +405,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             const color = remaining <= 4 ? '#cf5b5b' : remaining <= 9 ? '#d4a843' : '#7a9ab8';
             return (
               <span
+                data-tutorial="turn-counter"
                 title={`${remaining} tur kaldı`}
                 style={{
                   fontSize: '11px',
@@ -401,7 +429,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               #48: Voice section is wired in session pages so users can pick
               their mic/speaker; on home/lobby pages SettingsPopover is
               rendered without `voice` and the Voice section is hidden. */}
-          <SettingsPopover voice={voice} />
+          <SettingsPopover voice={voice} onReplayTutorial={replayTutorial} />
           {/* Evidence Board button (#48 — repurposed from old comm panel) */}
           <button
             onClick={() => setCommOpen(true)}
@@ -454,6 +482,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
           >Map</button>
           <button
+            data-tutorial="accuse-button"
             onClick={() => setIsAccuseOpen(true)}
             style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #7a3232', borderRadius: '6px', color: '#d46868', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d46868'; e.currentTarget.style.color = '#e88080'; }}
@@ -467,7 +496,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+      <div ref={scrollRef} data-tutorial="chat-area" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {mp.messages.map((msg) => (
           <ChatMessage
             key={msg.id}
@@ -525,6 +554,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onClose={() => setSidebarOpen(false)}
         talkingPlayerIds={voice.talkingPeerIds}
         selfTransmitting={voice.isTransmitting}
+      />
+
+      {/* #49: First-run tutorial overlay (auto on first playing, replayable from Settings) */}
+      <TutorialOverlay
+        visible={tutorialVisible}
+        onClose={() => setTutorialVisible(false)}
       />
 
       <CommPanel

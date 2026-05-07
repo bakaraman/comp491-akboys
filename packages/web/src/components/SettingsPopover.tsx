@@ -140,9 +140,12 @@ export interface SettingsPopoverProps {
   align?: 'left' | 'right';
   /** Optional voice-chat slice — when present, the Voice section is rendered. */
   voice?: VoiceSettingsSlice;
+  /** Callback to replay the in-game tutorial overlay (#49). When provided,
+   *  a "Tanıtımı Tekrar Göster" button appears in the popover. */
+  onReplayTutorial?: () => void;
 }
 
-export function SettingsPopover({ align = 'right', voice }: SettingsPopoverProps): React.ReactElement {
+export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: SettingsPopoverProps): React.ReactElement {
   const ambient = useAmbientSettings();
   const sfx = useSoundEffects();
   const [open, setOpen] = useState(false);
@@ -176,6 +179,7 @@ export function SettingsPopover({ align = 'right', voice }: SettingsPopoverProps
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
         ref={buttonRef}
+        data-tutorial="settings-button"
         onClick={() => setOpen((v) => !v)}
         title={T.audio.open}
         aria-label={T.audio.open}
@@ -244,6 +248,34 @@ export function SettingsPopover({ align = 'right', voice }: SettingsPopoverProps
           />
 
           {voice && <VoiceSection voice={voice} />}
+
+          {onReplayTutorial && (
+            <button
+              onClick={() => {
+                onReplayTutorial();
+                setOpen(false);
+              }}
+              style={{
+                marginTop: '14px',
+                width: '100%',
+                padding: '8px 12px',
+                backgroundColor: 'transparent',
+                border: '1px solid #3a3530',
+                borderRadius: '6px',
+                color: '#b0a080',
+                fontFamily: 'monospace',
+                fontSize: '11px',
+                letterSpacing: '0.5px',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d4a843'; e.currentTarget.style.color = '#d4a843'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#3a3530'; e.currentTarget.style.color = '#b0a080'; }}
+            >
+              {T.tutorial.replayButton}
+            </button>
+          )}
         </div>
       )}
     </div>
