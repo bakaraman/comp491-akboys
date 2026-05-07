@@ -112,11 +112,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
 
-  /* ---- Voice chat (#48) — V-key walkie-talkie mesh ---- */
+  /* ---- Voice chat (#48) — V-key walkie-talkie mesh.
+   *  Active from the moment the player has joined the multiplayer
+   *  session: lobby + voting + playing + ended. Players coordinate
+   *  before the game starts and debrief after the finale. */
   const voice = useVoiceChat({
     sessionId,
     myPlayerId: mp.myPlayerId,
-    enabled: isMultiplayer && mp.gameState === 'playing',
+    enabled: isMultiplayer && !!mp.myPlayerId,
   });
 
   /* Music lives only inside OpeningCinematic + FinaleCinematic overlays */
