@@ -402,7 +402,8 @@ export function LobbyScreen({
 
         {/* Story ready — Start button (gated on TTS only; image is best-effort) */}
         {storyReady && (() => {
-          const gateReady = ttsReady;
+          const gateReady = true; // TTS is best-effort, don't block game start
+          void ttsReady;
           void imageReady;
           return (
             <div

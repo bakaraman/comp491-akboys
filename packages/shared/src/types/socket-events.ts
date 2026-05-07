@@ -75,6 +75,8 @@ export interface SessionStateDTO {
   turnCount?: number;
   /** Max turns for this session — sourced from scenario.maxTurns */
   maxTurns?: number;
+  /** Number of spectators currently watching (#52) */
+  spectatorCount?: number;
 }
 
 /* ------------------------------------------------------------------ */
