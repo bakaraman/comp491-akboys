@@ -13,6 +13,7 @@
 
 import type { Server, Socket } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@akboys/shared';
+import { socketMap } from './handlers.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -26,21 +27,17 @@ const voiceParticipants = new Map<string, Set<string>>();
 
 /**
  * Find every connected socketId that belongs to a given playerId in a
- * given session. Mirrors the helper in handlers.ts but is duplicated here
- * to keep voice handler self-contained.
+ * given session. Uses the same module-level socketMap that handlers.ts
+ * maintains so voice routing stays in sync with player presence.
  */
 function findSocketsForPlayer(
-  io: GameServer,
+  _io: GameServer,
   sessionId: string,
   playerId: string,
 ): string[] {
-  const room = io.sockets.adapter.rooms.get(sessionId);
-  if (!room) return [];
   const result: string[] = [];
-  for (const sid of room) {
-    const sock = io.sockets.sockets.get(sid);
-    const data = sock?.data as { playerId?: string; sessionId?: string } | undefined;
-    if (data?.playerId === playerId && data.sessionId === sessionId) {
+  for (const [sid, mapping] of socketMap) {
+    if (mapping.playerId === playerId && mapping.sessionId === sessionId) {
       result.push(sid);
     }
   }

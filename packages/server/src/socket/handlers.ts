@@ -54,8 +54,9 @@ import { setupVoiceHandlers, leaveVoice } from './voice-handlers.js';
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
-/** Maps a socket ID to the session and player it belongs to */
-const socketMap = new Map<string, { sessionId: string; playerId: string }>();
+/** Maps a socket ID to the session and player it belongs to.
+ *  Exported so sibling files (voice-handlers.ts) can route by player. */
+export const socketMap = new Map<string, { sessionId: string; playerId: string }>();
 
 /**
  * Pending disconnect timers keyed by playerId. If the player reconnects within
