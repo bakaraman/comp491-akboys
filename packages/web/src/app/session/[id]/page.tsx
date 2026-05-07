@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback, use } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { GameState } from '@/types/shared';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInput } from '@/components/ChatInput';
@@ -65,6 +66,8 @@ interface SessionInfo {
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = use(params);
+  const searchParams = useSearchParams();
+  const isSpectator = searchParams.get('role') === 'spectator';
   const [authReady, setAuthReady] = useState(!authEnabled());
 
   useEffect(() => {
@@ -205,6 +208,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setShowNamePopup(true);
     }
   }, [isMultiplayer, mp.isConnected, mp.myPlayerId, storedName, nameLoaded, autoJoinAttempted]);
+
+  /* ---- Spectator join (#52): connect to the socket room without joining as player ---- */
+  const spectatorJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!isSpectator || !mp.isConnected || spectatorJoinedRef.current) return;
+    spectatorJoinedRef.current = true;
+    // Emit spectator:join directly via the socket
+    import('@/lib/socket').then(({ getSocket }) => {
+      const sock = getSocket();
+      // spectator:join is not in ClientToServerEvents; escape type check safely
+      (sock as unknown as { emit: (ev: string, data: unknown) => void })
+        .emit('spectator:join', { sessionId, role: 'spectator' });
+    });
+  }, [isSpectator, mp.isConnected, sessionId]);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commOpen, setCommOpen] = useState(false);
@@ -282,7 +299,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ================================================================ */
   /*  RENDER: Joining / Name entry (pre-join)                          */
   /* ================================================================ */
-  if (!mp.myPlayerId) {
+  // Spectators skip the player-join flow — they see the game immediately
+  if (!mp.myPlayerId && !isSpectator) {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <div style={{ textAlign: 'center' }}>
@@ -360,6 +378,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             {gameEmoji} {gameScenarioTitle}
           </span>
           {roomCode && <span style={{ fontSize: '10px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>{roomCode}</span>}
+          {/* Spectator badge (#52) */}
+          {isSpectator && (
+            <span style={{
+              fontSize: '10px', fontFamily: 'monospace', letterSpacing: '1px',
+              color: '#5a7a9a', border: '1px solid #2a4a6a', borderRadius: '4px',
+              padding: '2px 7px', textTransform: 'uppercase',
+            }}>👁 İzleyici</span>
+          )}
           {/* C.4: Turn counter badge — color shifts as turns run out */}
           {mp.turnInfo && (() => {
             const { turnCount, maxTurns } = mp.turnInfo;
@@ -435,12 +461,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7a9ab8'; e.currentTarget.style.color = '#9ab8d0'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
           >Map</button>
-          <button
-            onClick={() => setIsAccuseOpen(true)}
-            style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #7a3232', borderRadius: '6px', color: '#d46868', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d46868'; e.currentTarget.style.color = '#e88080'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#7a3232'; e.currentTarget.style.color = '#d46868'; }}
-          >{T.game.accuse}</button>
+          {/* Hide Accuse + Leave buttons for spectators */}
+          {!isSpectator && (
+            <button
+              onClick={() => setIsAccuseOpen(true)}
+              style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #7a3232', borderRadius: '6px', color: '#d46868', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d46868'; e.currentTarget.style.color = '#e88080'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#7a3232'; e.currentTarget.style.color = '#d46868'; }}
+            >{T.game.accuse}</button>
+          )}
           <button onClick={handleLeave} style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#cf5b5b'; e.currentTarget.style.color = '#cf5b5b'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
@@ -486,8 +515,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         )}
       </div>
 
-      {/* Suggestions */}
-      {mp.suggestions.length > 0 && !mp.isNarratorStreaming && (
+      {/* Hide chat input and suggestions for spectators (#52) */}
+      {!isSpectator && mp.suggestions.length > 0 && !mp.isNarratorStreaming && (
         <div style={{ display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a' }}>
           {mp.suggestions.map((s, i) => (
             <button key={i} onClick={() => mp.sendAction(s)} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '20px', color: '#b0a080', fontSize: '13px', fontFamily: 'Georgia, serif', fontStyle: 'italic', cursor: 'pointer', transition: 'all 0.2s' }}
@@ -498,7 +527,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      <ChatInput onSend={mp.sendAction} onTypingChange={mp.sendTyping} playerName={myPlayer?.name} />
+      {!isSpectator && <ChatInput onSend={mp.sendAction} onTypingChange={mp.sendTyping} playerName={myPlayer?.name} />}
+      {isSpectator && (
+        <div style={{ padding: '10px 20px', borderTop: '1px solid #1a1a1a', textAlign: 'center', fontSize: '11px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>
+          👁 İzleyici modunda — sadece okuyabilirsiniz
+        </div>
+      )}
 
       <PlayerSidebar players={mp.players} myPlayerId={mp.myPlayerId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 

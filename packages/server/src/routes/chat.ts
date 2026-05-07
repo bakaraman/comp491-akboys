@@ -707,3 +707,39 @@ chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Respon
     if (!res.headersSent) res.status(500).json({ error: 'Reconstruction failed' });
   }
 });
+
+/* ================================================================== */
+/*  GET /api/chat/replay/:sessionId — Issue #52                        */
+/*  Returns full session history for a finished (ended) session.       */
+/*  403 if session still in progress; no auth required for ended games. */
+/* ================================================================== */
+chatRouter.get('/replay/:sessionId', async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const session = store.get(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    if (session.state !== 'ended') {
+      res.status(403).json({ error: 'Session is still in progress — use live spectator mode' });
+      return;
+    }
+    res.json({
+      sessionId: session.id,
+      state: session.state,
+      history: session.history,
+      world: session.world,
+      commHistory: session.commHistory,
+      worldStateLog: session.worldStateLog,
+      reconstruction: session.reconstruction,
+      players: Array.from(session.players.values()).map(toPlayerDTO),
+      mpTurnCount: session.mpTurnCount,
+      createdAt: session.createdAt,
+      lastActivityAt: session.lastActivityAt,
+    });
+  } catch (err) {
+    console.error('[replay] error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Replay fetch failed' });
+  }
+});

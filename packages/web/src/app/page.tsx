@@ -95,6 +95,37 @@ export default function HomePage() {
     setLoadingAction(null);
   }
 
+  async function handleSpectate(e?: React.FormEvent) {
+    e?.preventDefault();
+    const code = roomCode.trim().toUpperCase();
+    if (code.length !== 6) {
+      setError(T.multiplayer.invalidCode);
+      return;
+    }
+    if (loadingAction) return;
+    setLoadingAction('join');
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/room/${code}`, {
+        headers: await getAuthHeaders(),
+      });
+      if (!res.ok) {
+        setError(T.multiplayer.noRoom);
+        setLoadingAction(null);
+        return;
+      }
+      const data = await res.json();
+      if (data.sessionId) {
+        router.push(`/session/${data.sessionId}?role=spectator`);
+        return;
+      }
+      setError(T.errors.generic);
+    } catch {
+      setError(T.errors.networkError);
+    }
+    setLoadingAction(null);
+  }
+
   if (!loaded) return null;
 
   return (
@@ -341,6 +372,32 @@ export default function HomePage() {
                   {loadingAction === 'join' ? T.home.joining : T.home.joinButton}
                 </button>
               </form>
+              {/* Spectator join — Issue #52 */}
+              <button
+                onClick={handleSpectate}
+                disabled={roomCode.trim().length !== 6 || loadingAction !== null}
+                style={{
+                  marginTop: '10px',
+                  width: '100%',
+                  padding: '10px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #2a2520',
+                  borderRadius: '8px',
+                  color: roomCode.trim().length !== 6 || loadingAction ? '#3a3530' : '#7a6a50',
+                  fontSize: '13px',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  cursor: roomCode.trim().length !== 6 || loadingAction ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                  letterSpacing: '0.3px',
+                }}
+                onMouseOver={(e) => {
+                  if (roomCode.trim().length === 6 && !loadingAction)
+                    e.currentTarget.style.borderColor = '#5a5040';
+                }}
+                onMouseOut={(e) => (e.currentTarget.style.borderColor = '#2a2520')}
+              >
+                👁 İzleyici olarak katıl
+              </button>
             </div>
           </div>
 
