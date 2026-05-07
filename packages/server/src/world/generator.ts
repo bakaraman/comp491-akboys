@@ -33,7 +33,7 @@ const DEBUG = '[world-gen]';
 /* ------------------------------------------------------------------ */
 
 function buildSystemPrompt(playerCount: number): string {
-  return `You are a noir mystery generator. Create a complete, playable detective story for ${playerCount} detective players. Output must match the JSON schema exactly.
+  return `You are a mystery generator. Create a complete, playable detective story for ${playerCount} detective players. Output must match the JSON schema exactly.
 
 STRUCTURAL RULES:
 - Create EXACTLY ${playerCount + 2} rooms. Graph should be navigable.
@@ -49,23 +49,34 @@ CRITICAL EXIT RULES:
 - Exits are HINTS — the narrator has final movement authority at runtime.
 - Still, prefer bidirectional exits (A.north=B → B.south=A) and a connected graph for sensible navigation.
 
-OPENING NARRATION (important — this is the only scene-setting text the player sees):
-- 4-6 Turkish sentences. Clear, natural prose. No bullet points, no headings. **Not literary — normal anlatıcı tonu.**
-- Bake in era + location + mood naturally (e.g. "1947 sonbaharı. Yağmurlu bir yatılı okul. Gece yarısı, çan kulesinden bir çığlık yankılandı.") rather than stating them like labels.
-- Each sentence drops a concrete fact. No poetic metaphors, no ornamental phrases.
-- Write for the ear — TTS will read it.
+RED HERRINGS (REQUIRED — at least 1 per world):
+- At LEAST 1 item must have isRedHerring: true. This item looks suspicious and evidence-like but is NOT the real key clue.
+- Accusing the culprit with a red herring item as the "key evidence" fails — it is a deliberate misdirection.
+- All other items must have isRedHerring: false.
+- The red herring should be physically close to the crime scene or connected to an innocent NPC's hidden secret.
+
+ALIBI RULES (REQUIRED — every NPC must have a complete alibi object):
+- Every NPC must have alibi.claimedLocation and alibi.claimedActivity filled in Turkish.
+- alibi.corroboratedBy: name of an NPC who can confirm it (or null if alone).
+- alibi.inconsistency: CULPRIT ONLY — a specific, player-discoverable contradiction (e.g. "claims to have been in the garden, but the groundskeeper locked the gate at 22:30"). Leave null for innocent NPCs.
+- alibiClaim: a short Turkish summary of the alibi (used in quick references).
+- Style: NPCs should reveal their alibis under pressure; the alibi must feel personal and drawn from their backstory.
+
+BACKSTORY RULES (REQUIRED — every NPC must have a backstory):
+- Every NPC must have backstory: 2-3 Turkish sentences of personal history.
+- Each backstory must be distinct enough that the narrator's voice for that character feels different.
+- The backstory should hint at the NPC's personality without directly stating it.
 
 KILLER AMBIGUITY (essential for a good mystery):
 - EVERY NPC (innocent or guilty) must have:
   * Surface-level suspicious behavior (lies in alibiClaim, nervous tics in description)
   * A plausible-seeming motive
-  * A "red herring" pointing misleadingly at them
 - Innocent NPCs hide UNRELATED secrets (affairs, small theft, shame, debt) — use hiddenSecret.
 - knownInfo is what the NPC ACTUALLY knows (narrator's eyes only — used to make them lie convincingly).
 - The player should suspect 2-3 NPCs until the narrative deduces the real answer.
 
 LANGUAGE (STRICT):
-- ALL player-facing text MUST be in Turkish: room names + descriptions, NPC names + roles + descriptions, narrativeHooks, openingNarration, alibiClaim, knownInfo, hiddenSecret, item names + descriptions, solution.motiveShort.
+- ALL player-facing text MUST be in Turkish: room names + descriptions, NPC names + roles + descriptions, narrativeHooks, openingNarration, alibiClaim, alibi fields, backstory, knownInfo, hiddenSecret, item names + descriptions, solution.motiveShort.
 - Technical IDs (snake_case English): room.id, npc.id, item.id, roomId refs, keyEvidenceId, culpritNpcId.
 - imagePrompt, portraitPrompt, visualStylePrompt, openingImagePrompt: English (for image generation).
 
@@ -81,7 +92,7 @@ VISUAL STYLE:
 - Each npc.portraitPrompt: head-and-shoulders portrait, period-appropriate, matches style.
 
 OPENING NARRATION:
-- 3-4 Turkish sentences, literary, for the ear (TTS will read it).
+- 4-6 Turkish sentences. Clear, natural prose. Bake in era + location + mood naturally. Write for the ear — TTS will read it.
 
 OUTPUT: Single JSON object matching the provided schema exactly.`;
 }
@@ -168,6 +179,12 @@ export function validateWorld(world: WorldData, expectedPlayerCount: number): Va
   const evidenceCount = world.items.filter((i) => i.isEvidence).length;
   if (evidenceCount < 2) {
     errors.push(`Expected at least 2 evidence items, got ${evidenceCount}`);
+  }
+
+  // 8. At least 1 red herring item
+  const redHerringCount = world.items.filter((i) => i.isRedHerring).length;
+  if (redHerringCount < 1) {
+    errors.push('Expected at least 1 red herring item (isRedHerring: true), got 0');
   }
 
   return { valid: errors.length === 0, errors };
