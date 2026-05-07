@@ -21,7 +21,7 @@ export const SCENARIOS: Record<string, Scenario> = {
       'A jazz singer has gone missing from The Velvet Lounge. ' +
       'You are a private detective hired to find her. ' +
       'The rain never stops, the whiskey is cheap, and everyone has something to hide.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'bartender',
       evidenceId: 'matchbook',
@@ -156,7 +156,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'You are a paranormal investigator called to Hollow Manor after the owner vanished. ' +
       'The locals say the house is alive. Your job is to find out what really happened.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'caretaker',
       evidenceId: 'old_journal',
@@ -263,7 +263,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'Three crew members have gone missing aboard Station Zero. ' +
       'You are the head of security. The station AI is glitching, and the airlocks are cycling on their own.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'scientist',
       evidenceId: 'research_notes',
@@ -370,7 +370,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'The treasure map that would make the crew rich has been stolen from the captain\'s cabin. ' +
       'You are the first mate, and the captain wants answers before the tide goes out.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'quartermaster',
       evidenceId: 'hidden_note',
@@ -476,7 +476,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'Sheriff Morgan was found dead in his office at dawn. ' +
       'You are a bounty hunter passing through town, and the deputy has asked for your help before the killer escapes.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'shopkeeper',
       evidenceId: 'receipt',
@@ -584,7 +584,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     synopsis:
       'A legendary hacker known as "Specter" has gone missing from the grid. ' +
       'You are a street runner hired by an anonymous client to find them before a megacorp does.',
-    maxTurns: 12,
+    maxTurns: 40,
     solution: {
       culpritId: 'fixer',
       evidenceId: 'encrypted_drive',

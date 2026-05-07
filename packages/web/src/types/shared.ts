@@ -97,6 +97,29 @@ export interface ClientToServerEvents {
   ) => void;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Reconstruction (A.3) — mirror of @akboys/shared types              */
+/* ------------------------------------------------------------------ */
+
+export interface ReconstructionEvent {
+  turn: number;
+  time: string;
+  roomId: string;
+  roomName: string;
+  actorNpcId: string;
+  actorName: string;
+  actorRole: string;
+  description: string;
+  isCulpritAction: boolean;
+}
+
+export interface ReconstructionDTO {
+  title: string;
+  events: ReconstructionEvent[];
+  conclusion: string;
+  generatedAt: number;
+}
+
 export interface SessionStateDTO {
   id: string;
   scenarioId: string;
@@ -115,6 +138,9 @@ export interface SessionStateDTO {
   scenarioVotes?: Record<string, string[]>;
   commHistory?: CommMessageDTO[];
   sharedEvidence?: SharedEvidenceEntry[];
+  /** C.4: turn counter for reload sync */
+  turnCount?: number;
+  maxTurns?: number;
 }
 
 export interface SharedEvidenceEntry {
@@ -130,6 +156,8 @@ export interface ServerToClientEvents {
     sessionId: string;
     scenarioTitle: string;
     players: PlayerDataDTO[];
+    /** C.1: shared opening narration for immediate render */
+    openingNarration?: string;
   }) => void;
   'narrator:chunk': (data: { content: string; fullText: string; targetPlayerId?: string }) => void;
   'narrator:done': (data: {
@@ -235,5 +263,10 @@ export interface ServerToClientEvents {
     kind: 'opening' | 'room' | 'npc';
     id: string;
     url: string;
+  }) => void;
+  /** C.4: turn counter broadcast */
+  'turn:updated': (data: {
+    turnCount: number;
+    maxTurns: number;
   }) => void;
 }

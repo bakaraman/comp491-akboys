@@ -14,6 +14,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { T } from '@/lib/tr';
 import { getAuthHeaders } from '@/lib/firebase';
+import { ReconstructionReplay } from './ReconstructionReplay';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 const AMBIENT_TRACK = '/ambient-urban-noir.m4a';
@@ -42,6 +43,8 @@ export function FinaleCinematic({
   const [ttsStarted, setTtsStarted] = useState(false);
   const [ttsDone, setTtsDone] = useState(false);
   const [culpritName, setCulpritName] = useState<string | null>(null);
+  /* A.3: post-finale crime-scene reconstruction modal */
+  const [reconstructionOpen, setReconstructionOpen] = useState(false);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const ttsRef = useRef<HTMLAudioElement | null>(null);
   const ttsStartedRef = useRef(false);
@@ -238,6 +241,17 @@ export function FinaleCinematic({
   const isWin = outcome === 'won';
   const shown = fullText.slice(0, visibleChars);
 
+  // A.3: Render the reconstruction modal as a sibling overlay (z-index above
+  // the finale scrim) so it opens on top without unmounting the finale state.
+  if (reconstructionOpen) {
+    return (
+      <ReconstructionReplay
+        sessionId={sessionId}
+        onClose={() => setReconstructionOpen(false)}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -319,9 +333,27 @@ export function FinaleCinematic({
               display: 'flex',
               gap: '12px',
               justifyContent: 'center',
+              flexWrap: 'wrap',
               animation: 'fadeInUp 0.6s ease',
             }}
           >
+            {/* A.3: CTA — open the crime-scene reconstruction modal. */}
+            <button
+              onClick={() => setReconstructionOpen(true)}
+              style={{
+                padding: '14px 24px',
+                backgroundColor: '#15110a',
+                border: '1px solid #d4a843',
+                borderRadius: '8px',
+                color: '#d4a843',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                letterSpacing: '1px',
+                cursor: 'pointer',
+              }}
+            >
+              {T.reconstruction.cta}
+            </button>
             <button
               onClick={onHome}
               style={{

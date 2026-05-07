@@ -20,6 +20,8 @@ interface ChatMessageProps {
   playerColor?: string;
   imageUrl?: string;
   isLoadingImage?: boolean;
+  /** Server-side classification — 'global' renders the shared opening style. */
+  messageType?: 'global' | 'observed' | 'private' | 'action';
 }
 
 export function ChatMessage({
@@ -29,7 +31,50 @@ export function ChatMessage({
   playerColor,
   imageUrl,
   isLoadingImage,
+  messageType,
 }: ChatMessageProps) {
+  /* ---- C.1: Shared opening narration — distinct style ---- */
+  if (messageType === 'global' && role === 'assistant') {
+    return (
+      <div style={{ marginBottom: '20px', padding: '0 4px' }}>
+        <div style={{
+          textAlign: 'center',
+          fontSize: '10px',
+          color: '#d4a843',
+          fontFamily: 'monospace',
+          letterSpacing: '4px',
+          textTransform: 'uppercase',
+          marginBottom: '8px',
+          opacity: 0.7,
+        }}>
+          ── Açılış ──
+        </div>
+        <div style={{
+          padding: '20px 24px',
+          backgroundColor: '#15110a',
+          border: '2px solid #d4a843',
+          borderRadius: '12px',
+          color: '#e8d8b0',
+          fontSize: '15px',
+          fontStyle: 'italic',
+          lineHeight: '1.8',
+          fontFamily: 'Georgia, serif',
+          boxShadow: '0 0 24px rgba(212, 168, 67, 0.12)',
+        }}>
+          <Markdown
+            components={{
+              p: ({ children }) => <p style={{ margin: '0 0 10px 0' }}>{children}</p>,
+              strong: ({ children }) => <strong style={{ color: '#d4a843', fontStyle: 'normal' }}>{children}</strong>,
+              em: ({ children }) => <em style={{ color: '#e8d8b0' }}>{children}</em>,
+            }}
+          >
+            {content}
+          </Markdown>
+        </div>
+      </div>
+    );
+  }
+
   /* ---- Observed messages (what you see others doing) ---- */
   if (role === 'observed') {
     return (

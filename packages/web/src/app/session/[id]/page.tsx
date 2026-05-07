@@ -27,6 +27,9 @@ import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
+import { SettingsPopover } from '@/components/SettingsPopover';
+import { useAmbientLoop } from '@/hooks/useAmbientLoop';
+import { useUiClickSound } from '@/lib/uiClick';
 import { authEnabled, getAuthHeaders, subscribeToAuth } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
@@ -126,6 +129,24 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [openingDismissed, setOpeningDismissed] = useState(false);
+
+  /* ---- A.2: Audio side effects ----
+   * Three independent ambient layers must never overlap:
+   *   - lobby ambient (this hook): pre-game phase
+   *   - cinematic ambient (managed by Opening/FinaleCinematic, untouched):
+   *     plays under TTS during opening + finale overlays
+   *   - in-game ambient (this hook): mid-game between cinematics
+   * The booleans below derive from existing render conditions further down
+   * so the audio state machine is the single source of truth for the page.
+   */
+  useUiClickSound();
+  const cinematicMounted =
+    (mp.gameState === 'playing' && !!mp.worldMeta && !openingDismissed && !mp.gameOver)
+    || !!mp.gameOver;
+  const lobbyAmbientActive = mp.gameState === 'lobby' || mp.gameState === 'voting';
+  const inGameAmbientActive = mp.gameState === 'playing' && openingDismissed && !mp.gameOver;
+  useAmbientLoop('/ambient/ambient-lobby.mp3', lobbyAmbientActive && !cinematicMounted);
+  useAmbientLoop('/ambient/ambient-game.mp3', inGameAmbientActive && !cinematicMounted);
 
   /* ---- Pre-fetch opening narration TTS as soon as story is ready ---- */
   const [openingTtsUrl, setOpeningTtsUrl] = useState<string | null>(null);
@@ -339,9 +360,34 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             {gameEmoji} {gameScenarioTitle}
           </span>
           {roomCode && <span style={{ fontSize: '10px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>{roomCode}</span>}
+          {/* C.4: Turn counter badge — color shifts as turns run out */}
+          {mp.turnInfo && (() => {
+            const { turnCount, maxTurns } = mp.turnInfo;
+            const remaining = maxTurns - turnCount;
+            const color = remaining <= 4 ? '#cf5b5b' : remaining <= 9 ? '#d4a843' : '#7a9ab8';
+            return (
+              <span
+                title={`${remaining} tur kaldı`}
+                style={{
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '1px',
+                  color,
+                  padding: '3px 8px',
+                  border: `1px solid ${color}`,
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {T.game.turnsLabel} {turnCount}/{maxTurns}
+              </span>
+            );
+          })()}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CopyLinkButton compact />
+          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted */}
+          <SettingsPopover />
           {/* Communication button */}
           <button
             onClick={() => setCommOpen(true)}
@@ -402,47 +448,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      {/* Pinned opening narration — always visible above the chat */}
-      {mp.worldMeta?.openingNarration && (
-        <div
-          style={{
-            padding: '16px 24px',
-            borderBottom: '1px solid #2a2520',
-            backgroundColor: '#0d0d0d',
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              fontSize: '10px',
-              color: '#5a5545',
-              fontFamily: 'monospace',
-              letterSpacing: '2px',
-              textTransform: 'uppercase',
-              marginBottom: '6px',
-            }}
-          >
-            Hikaye · {mp.worldMeta.title}
-          </div>
-          <div
-            style={{
-              color: '#b0a080',
-              fontFamily: 'Georgia, serif',
-              fontStyle: 'italic',
-              fontSize: '13px',
-              lineHeight: '1.7',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {mp.worldMeta.openingNarration}
-          </div>
-        </div>
-      )}
-
       {/* Messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {mp.messages.map((msg) => (
-          <ChatMessage key={msg.id} role={msg.role} content={msg.content} playerName={msg.playerName} playerColor={msg.playerColor} />
+          <ChatMessage
+            key={msg.id}
+            role={msg.role}
+            content={msg.content}
+            playerName={msg.playerName}
+            playerColor={msg.playerColor}
+            messageType={msg.messageType}
+          />
         ))}
         {mp.isNarratorStreaming && mp.streamingText && <ChatMessage role="assistant" content={mp.streamingText} />}
         {typingNames.length > 0 && (
@@ -700,7 +716,7 @@ function AccusationVoteBanner({
 }
 
 /* ================================================================== */
-/*  AccuseModal — simple suspect picker (replaces EvidenceBoard)        */
+/*  AccuseModal — simple suspect picker                                 */
 /* ================================================================== */
 
 interface AccuseSuspect {

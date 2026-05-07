@@ -16,10 +16,12 @@ import {
   generateSceneImage,
   narratorChatStream,
   suggestFollowUps,
+  buildContextFallbacks,
 } from '../middleware/openai.js';
+import { buildSceneContext } from '../socket/prompt-builder.js';
 import { requireAuth } from '../middleware/auth.js';
 import { SCENARIOS } from '@akboys/shared';
-import type { Scenario } from '@akboys/shared';
+import type { Scenario, ReconstructionDTO } from '@akboys/shared';
 import {
   FirestoreSessionStore,
   MemorySessionStore,
@@ -34,6 +36,7 @@ import {
   generateAllNpcPortraits,
   streamTts,
   streamFinale,
+  generateReconstruction,
   type FinaleOutcome,
 } from '../world/index.js';
 
@@ -323,21 +326,33 @@ chatRouter.post('/', requireAuth, async (req: Request, res: Response) => {
 
 /** POST /api/chat/suggestions — Get 3 follow-up action suggestions (fast, gpt-5-nano) */
 chatRouter.post('/suggestions', requireAuth, async (req: Request, res: Response) => {
+  // C.2: Build a scene context if we can identify the player's room, so the
+  // suggestion model and fallbacks reference what's actually present.
+  let ctx: ReturnType<typeof buildSceneContext> | undefined;
   try {
     const { sessionId } = req.body as { sessionId?: string };
     const session = sessionId ? store.get(sessionId) : undefined;
+    const scenario = session ? getScenarioForSession(session) : null;
+    if (session && scenario) {
+      // SP sessions store the active room on gameState; fall back to the first
+      // player's room if one exists (MP), otherwise the scenario's start room.
+      const roomId =
+        session.gameState.currentRoomId
+        || Array.from(session.players.values())[0]?.currentRoomId
+        || scenario.rooms[0]?.id
+        || '';
+      if (roomId) ctx = buildSceneContext(scenario, session, roomId);
+    }
     const lastAssistant = session?.history.filter((m) => m.role === 'assistant').pop();
-
     if (!lastAssistant) {
-      res.json({ suggestions: ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'] });
+      res.json({ suggestions: buildContextFallbacks(ctx) });
       return;
     }
-
-    const suggestions = await suggestFollowUps(lastAssistant.content);
+    const suggestions = await suggestFollowUps(lastAssistant.content, ctx);
     res.json({ suggestions });
   } catch (err) {
     console.error('[suggestions] error:', err);
-    res.json({ suggestions: ['Etrafına bak', 'Biriyle konuş', 'Odayı incele'] });
+    res.json({ suggestions: buildContextFallbacks(ctx) });
   }
 });
 
@@ -600,6 +615,8 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
     const playerNames = Array.from(session.players.values()).map((p) => p.name).join(', ');
     let fullText = '';
     try {
+      const finaleScenario = getScenarioForSession(session);
+      const finaleMaxTurns = finaleScenario?.maxTurns ?? 40;
       for await (const chunk of streamFinale({
         world: session.world,
         outcome,
@@ -609,7 +626,7 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         evidencePresentedId: session.world.solution.keyEvidenceId,
         worldStateLog: session.worldStateLog,
         turnCount: session.mpTurnCount,
-        maxTurns: 40,
+        maxTurns: finaleMaxTurns,
       })) {
         fullText += chunk;
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
@@ -625,5 +642,68 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error(`${DEBUG_PREFIX} finale error`, err);
     if (!res.headersSent) res.status(500).json({ error: 'Finale failed' });
+  }
+});
+
+/* ================================================================== */
+/*  POST /api/chat/reconstruction — A.3 / Issue #36                    */
+/*  Crime-scene reconstruction timeline. Cached on the session so      */
+/*  re-opening the modal doesn't re-burn an LLM call.                  */
+/* ================================================================== */
+chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body as { sessionId?: string };
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId is required' });
+      return;
+    }
+
+    const session = store.get(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    if (!session.world) {
+      res.status(400).json({ error: 'No world for this session' });
+      return;
+    }
+
+    // Cache hit — return the previously generated reconstruction. Idempotent
+    // for the lifetime of the session, which is what we want: the modal
+    // can be reopened multiple times without thrashing the LLM.
+    if (session.reconstruction) {
+      console.log(`[reconstruction ${sessionId.slice(0, 8)}] ✓ cache hit (${session.reconstruction.events.length} events)`);
+      res.json({ reconstruction: session.reconstruction });
+      return;
+    }
+
+    // Single-flight: if another client kicked off a generation moments ago,
+    // await the same Promise instead of starting a parallel LLM call. Two
+    // racing calls would otherwise produce two different reconstructions
+    // (different event counts, different conclusions) — each client keeping
+    // its own response while the second write quietly overwrites the first.
+    const inflight = store.getInflightReconstruction(sessionId);
+    if (inflight) {
+      console.log(`[reconstruction ${sessionId.slice(0, 8)}] ⇢ awaiting in-flight generation`);
+      const dto = await inflight;
+      res.json({ reconstruction: dto });
+      return;
+    }
+
+    const generation = (async (): Promise<ReconstructionDTO> => {
+      const dto = await generateReconstruction(session.world!, session.worldStateLog);
+      store.setReconstruction(sessionId, dto);
+      return dto;
+    })();
+    store.setInflightReconstruction(sessionId, generation);
+    try {
+      const dto = await generation;
+      res.json({ reconstruction: dto });
+    } finally {
+      store.clearInflightReconstruction(sessionId);
+    }
+  } catch (err) {
+    console.error(`${DEBUG_PREFIX} reconstruction error`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'Reconstruction failed' });
   }
 });

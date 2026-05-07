@@ -29,6 +29,8 @@ export interface DisplayMessage {
   playerName?: string;
   playerColor?: string;
   timestamp: number;
+  /** Server-side message classification. 'global' = shared opening narration. */
+  messageType?: 'global' | 'observed' | 'private' | 'action';
 }
 
 export interface BatchInfo {
@@ -121,6 +123,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   } | null>(null);
   const [roomImages, setRoomImages] = useState<Record<string, string>>({});
   const [npcPortraits, setNpcPortraits] = useState<Record<string, string>>({});
+  const [turnInfo, setTurnInfo] = useState<{ turnCount: number; maxTurns: number } | null>(null);
 
   const socketRef = useRef<GameSocket | null>(null);
   const msgIdCounter = useRef(0);
@@ -289,17 +292,35 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
       if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
       if (session.commHistory) setCommMessages(session.commHistory);
+      // C.4: turn counter from session state (reload sync)
+      if (typeof session.turnCount === 'number' && typeof session.maxTurns === 'number') {
+        setTurnInfo({ turnCount: session.turnCount, maxTurns: session.maxTurns });
+      }
 
-      // Rebuild message history — server already filtered for this player
-      const restored: DisplayMessage[] = session.history.map((m, i) => ({
-        id: `restored_${i}`,
-        role: ((m as any).messageType === 'observed' ? 'observed' : m.role) as DisplayMessage['role'],
-        content: m.content,
-        playerId: m.playerId,
-        playerName: m.playerName,
-        playerColor: m.playerColor,
-        timestamp: Date.now(),
-      }));
+      // Rebuild message history — server already filtered for this player.
+      // C.1: 'global' messageType (shared opening narration) renders as a
+      // narrator message but with a distinct opening style (see ChatMessage).
+      const restored: DisplayMessage[] = session.history.map((m, i) => {
+        const messageType = (m as { messageType?: DisplayMessage['messageType'] }).messageType;
+        let role: DisplayMessage['role'];
+        if (messageType === 'observed') {
+          role = 'observed';
+        } else if (messageType === 'global') {
+          role = 'assistant';
+        } else {
+          role = m.role as DisplayMessage['role'];
+        }
+        return {
+          id: `restored_${i}`,
+          role,
+          content: m.content,
+          playerId: m.playerId,
+          playerName: m.playerName,
+          playerColor: m.playerColor,
+          timestamp: Date.now(),
+          messageType,
+        };
+      });
       setMessages(restored);
       msgIdCounter.current = restored.length;
     });
@@ -311,9 +332,20 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     /* -- Game start event -- */
-    socket.on('game:started', ({ players: startedPlayers }) => {
+    socket.on('game:started', ({ players: startedPlayers, openingNarration }) => {
       setGameState('playing');
       setPlayers(startedPlayers);
+      // C.1: Render the shared opening narration immediately so it survives
+      // the cinematic dismissing without requiring a page refresh.
+      if (openingNarration && openingNarration.trim().length > 0) {
+        addMessage({
+          role: 'assistant',
+          content: openingNarration,
+          playerName: 'Anlatıcı',
+          timestamp: Date.now(),
+          messageType: 'global',
+        });
+      }
     });
 
     /* -- Scenario voting events -- */
@@ -389,6 +421,11 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       } else if (data.kind === 'npc') {
         setNpcPortraits((prev) => ({ ...prev, [data.id]: data.url }));
       }
+    });
+
+    /* -- Turn counter (C.4) -- */
+    socket.on('turn:updated', ({ turnCount, maxTurns }) => {
+      setTurnInfo({ turnCount, maxTurns });
     });
 
     /* -- Connect -- */
@@ -586,6 +623,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     worldMeta,
     roomImages,
     npcPortraits,
+    turnInfo,
 
     joinSession,
     selectScenario,

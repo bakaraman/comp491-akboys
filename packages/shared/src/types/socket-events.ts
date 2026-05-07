@@ -71,6 +71,10 @@ export interface SessionStateDTO {
     sharedByPlayerColor: string;
     timestamp: number;
   }>;
+  /** Current turn counter (C.4) — undefined while in lobby/voting */
+  turnCount?: number;
+  /** Max turns for this session — sourced from scenario.maxTurns */
+  maxTurns?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -178,6 +182,9 @@ export interface ServerToClientEvents {
     sessionId: string;
     scenarioTitle: string;
     players: PlayerDataDTO[];
+    /** C.1: shared opening narration so clients can render it immediately
+     *  without waiting for a session:state refetch (F5). */
+    openingNarration?: string;
   }) => void;
 
   /** Scoped narrator streaming — only the target player receives it */
@@ -346,6 +353,12 @@ export interface ServerToClientEvents {
     kind: 'opening' | 'room' | 'npc';
     id: string;
     url: string;
+  }) => void;
+
+  /** Turn counter broadcast (C.4) — emitted on game:start and after each batch */
+  'turn:updated': (data: {
+    turnCount: number;
+    maxTurns: number;
   }) => void;
 }
 

@@ -31,13 +31,19 @@ import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
 import {
   buildPlayerActionPrompt,
   buildOpeningPrompt,
+  buildSceneContext,
   parseStructuredResponse,
   parseLegacyTextResponse,
   parseStateChanges,
   buildCombinedUserMessage,
   validateDirective,
 } from './prompt-builder.js';
-import { narratorChatStream, narratorStructuredResponse, suggestFollowUps } from '../middleware/openai.js';
+import {
+  narratorChatStream,
+  narratorStructuredResponse,
+  suggestFollowUps,
+  buildContextFallbacks,
+} from '../middleware/openai.js';
 import {
   getScenarioForSession,
   generateWorld,
@@ -442,11 +448,17 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       // Generate scoped suggestions for the actor (witnesses don't get suggestions —
       // they read along but don't take actions on behalf of the actor).
+      // C.2: pass scene context so suggestions reference real NPCs / items / exits
+      // for the actor's CURRENT room (which may have changed mid-action via MOVE).
+      const updatedActor = store.getPlayer(sessionId, action.playerId);
+      const actorRoomId = updatedActor?.currentRoomId ?? action.roomId;
+      const sceneCtx = buildSceneContext(scenario, session, actorRoomId);
       let suggestions: string[];
       try {
-        suggestions = await suggestFollowUps(privateResponse);
+        suggestions = await suggestFollowUps(privateResponse, sceneCtx);
       } catch {
-        suggestions = ['Etrafına bak', 'Biriyle konuş', 'Başka odaya git'];
+        // Use the scene-aware fallback rather than scattered hardcoded tuples.
+        suggestions = buildContextFallbacks(sceneCtx);
       }
 
       // Send narrator:done to the actor AND to same-room witnesses.
@@ -477,6 +489,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     // ---- #25: Increment MP turn counter after each batch ----
     session.mpTurnCount++;
+
+    // ---- C.4: Broadcast turn update so clients can render the counter ----
+    io.to(sessionId).emit('turn:updated', {
+      turnCount: session.mpTurnCount,
+      maxTurns: scenario.maxTurns,
+    });
 
     if (scenario && session.mpTurnCount >= scenario.maxTurns && session.state === 'playing') {
       session.state = 'ended';
@@ -582,6 +600,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
           sharedEvidence: session.sharedEvidence || [],
+          // C.4: turn counter for reload/late-join sync
+          turnCount: session.mpTurnCount,
+          maxTurns: joinScenario?.maxTurns,
         },
       });
 
@@ -1055,11 +1076,38 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       callback({ success: true });
 
       const allPlayers = getAllPlayerDTOs(store, sessionId);
-      io.to(sessionId).emit('game:started', { sessionId, scenarioTitle: scenario.title, players: allPlayers });
+      io.to(sessionId).emit('game:started', {
+        sessionId,
+        scenarioTitle: scenario.title,
+        players: allPlayers,
+        // C.1: Send opening narration in the same payload so clients can
+        // prepend it to chat without needing a session:state refetch.
+        openingNarration: session.world?.openingNarration,
+      });
+
+      // C.4: Initial turn counter broadcast (turn 0 of N)
+      io.to(sessionId).emit('turn:updated', {
+        turnCount: session.mpTurnCount,
+        maxTurns: scenario.maxTurns,
+      });
+
+      // C.1: Persist the shared opening narration to history BEFORE per-player
+      // entry hooks. visibleTo is left empty so filterHistoryForPlayer treats
+      // it as a global message — every player (including reconnects and late
+      // joiners) sees it as the first narrator entry in chat.
+      const world = session.world;
+      if (world.openingNarration && world.openingNarration.trim().length > 0) {
+        store.addMessage(sessionId, {
+          role: 'assistant',
+          content: world.openingNarration,
+          playerName: 'Anlatıcı',
+          timestamp: Date.now(),
+          messageType: 'global',
+        });
+      }
 
       // Emit per-player entry scene narration as the opening.
       // Each player gets ONE narrator chunk that is scoped to them (their entry hook).
-      const world = session.world;
       const entries = world.entryScenes;
       const playerList = Array.from(session.players.values());
       for (let i = 0; i < playerList.length; i++) {
@@ -1219,6 +1267,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           scenarioVotes: serializeVotes(session),
           commHistory: filterCommHistoryForPlayer(session, playerId),
           sharedEvidence: session.sharedEvidence || [],
+          // C.4: turn counter for reload sync
+          turnCount: session.mpTurnCount,
+          maxTurns: scenario?.maxTurns,
         },
       });
 

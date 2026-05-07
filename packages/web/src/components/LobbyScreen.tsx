@@ -16,6 +16,7 @@
 
 import React, { useState } from 'react';
 import { T } from '@/lib/tr';
+import { SettingsPopover } from './SettingsPopover';
 
 export interface LobbyPlayer {
   id: string;
@@ -84,8 +85,15 @@ export function LobbyScreen({
         backgroundColor: '#0a0a0a',
         padding: '24px',
         overflowY: 'auto',
+        position: 'relative',
       }}
     >
+      {/* A.2: Audio settings — fixed top-left so it's always reachable in
+          lobby. align="left" so the panel opens rightward and doesn't
+          overflow the left edge of the viewport. */}
+      <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
+        <SettingsPopover align="left" />
+      </div>
       <div style={{ textAlign: 'center', maxWidth: '720px', width: '100%', marginTop: '24px' }}>
         {/* Room code */}
         <div style={{ marginBottom: '20px' }}>

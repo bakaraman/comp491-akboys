@@ -14,6 +14,7 @@
 
 import type { Scenario, PlayerAction, WorldStateEvent, WorldData } from '@akboys/shared';
 import type { SessionData } from '../store/SessionStore.js';
+import type { SceneContext } from '../middleware/openai.js';
 
 /* ------------------------------------------------------------------ */
 /*  Directive types                                                    */
@@ -27,6 +28,51 @@ export interface ParsedDirective {
   playerName: string;
   target: string;
   detail?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  C.2: Scene context for grounded suggestions                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Build a SceneContext from the player's current room. Used by
+ * suggestFollowUps so the model only proposes actions referencing
+ * NPCs, items, and exits that actually exist right now.
+ *
+ * NPC presence respects runtime state when available (npcStates may
+ * have been moved by performNPCMovement); otherwise falls back to the
+ * scenario's static roomId.
+ */
+export function buildSceneContext(
+  scenario: Scenario,
+  session: SessionData,
+  roomId: string,
+): SceneContext {
+  const room = scenario.rooms.find((r) => r.id === roomId);
+
+  const npcsInRoom = scenario.npcs
+    .filter((n) => {
+      const runtime = session.npcStates.get(n.id);
+      const currentRoom = runtime?.currentRoomId ?? n.roomId;
+      return currentRoom === roomId;
+    })
+    .map((n) => ({ name: n.name, description: n.description }));
+
+  const itemsInRoom = scenario.items
+    .filter((i) => i.roomId === roomId)
+    .map((i) => ({ name: i.name }));
+
+  const adjacentRoomNames = Object.values(room?.exits ?? {})
+    .map((targetId) => scenario.rooms.find((r) => r.id === targetId)?.name)
+    .filter((name): name is string => typeof name === 'string');
+
+  return {
+    roomName: room?.name,
+    roomDescription: room?.description,
+    npcsInRoom,
+    itemsInRoom,
+    adjacentRoomNames,
+  };
 }
 
 /* ------------------------------------------------------------------ */

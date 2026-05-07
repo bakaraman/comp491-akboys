@@ -153,4 +153,30 @@ export const T = {
     musicOn: 'Müzik açık',
     musicOff: 'Müzik kapalı',
   },
+
+  audio: {
+    settings: 'Ses Ayarları',
+    ambient: 'Atmosfer Müziği',
+    sfx: 'Ses Efektleri',
+    mute: 'Sustur',
+    unmute: 'Aç',
+    open: 'Ses ayarları',
+    close: 'Kapat',
+  },
+
+  reconstruction: {
+    cta: 'Olay Yerini Yeniden Canlandır',
+    loading: 'Gerçek olaylar bir araya getiriliyor…',
+    failed: 'Olay zinciri çıkarılamadı.',
+    retry: 'Tekrar Dene',
+    title: 'Gerçekte Ne Oldu',
+    culpritBadge: 'Katilin hareketi',
+    autoplay: 'Otomatik Oynat',
+    pause: 'Duraklat',
+    next: 'Sonraki',
+    prev: 'Önceki',
+    close: 'Kapat',
+    eventOf: 'Olay {n} / {total}',
+    conclusionTitle: 'Sonuç',
+  },
 } as const;

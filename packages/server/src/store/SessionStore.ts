@@ -24,6 +24,7 @@ import type {
   AccusationVote,
   NPCState,
   WorldData,
+  ReconstructionDTO,
 } from '@akboys/shared';
 import { PLAYER_COLORS } from '@akboys/shared';
 
@@ -105,6 +106,13 @@ export interface SessionData {
 
   /** Whether opening is ready (image + TTS if used) — game can start */
   openingReady: boolean;
+
+  /**
+   * A.3: Cached crime-scene reconstruction. Generated lazily after the game
+   * ends, on first request from the client. Cached so re-opening the
+   * "Show Reconstruction" modal doesn't re-burn an LLM call.
+   */
+  reconstruction: ReconstructionDTO | null;
 }
 
 /** Contract every session store must satisfy */
@@ -143,6 +151,17 @@ export interface SessionStore {
   setRoomImage(sessionId: string, roomId: string, url: string | null): void;
   setNpcPortrait(sessionId: string, npcId: string, url: string | null): void;
   markOpeningReady(sessionId: string): void;
+
+  /** A.3: Cache the reconstruction payload generated post-game. */
+  setReconstruction(sessionId: string, data: ReconstructionDTO): void;
+
+  /**
+   * A.3 single-flight: track an in-flight reconstruction Promise so two
+   * concurrent clients don't both burn an LLM call and race each other.
+   */
+  getInflightReconstruction(sessionId: string): Promise<ReconstructionDTO> | undefined;
+  setInflightReconstruction(sessionId: string, promise: Promise<ReconstructionDTO>): void;
+  clearInflightReconstruction(sessionId: string): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -173,6 +192,12 @@ export class MemorySessionStore implements SessionStore {
   protected sessions: Map<string, SessionData> = new Map();
   protected roomCodeIndex: Map<string, string> = new Map(); // roomCode -> sessionId
   protected cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * A.3 single-flight: when a reconstruction is being generated, the Promise
+   * lives here so concurrent requests can await the same result instead of
+   * each firing their own LLM call. Process-local; not persisted.
+   */
+  protected inflightReconstructions: Map<string, Promise<ReconstructionDTO>> = new Map();
   private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
 
@@ -221,6 +246,7 @@ export class MemorySessionStore implements SessionStore {
       roomImages: {},
       npcPortraits: {},
       openingReady: false,
+      reconstruction: null,
     };
 
     this.sessions.set(session.id, session);
@@ -451,6 +477,25 @@ export class MemorySessionStore implements SessionStore {
     session.openingReady = true;
     session.lastActivityAt = Date.now();
   }
+
+  setReconstruction(sessionId: string, data: ReconstructionDTO): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.reconstruction = data;
+    session.lastActivityAt = Date.now();
+  }
+
+  getInflightReconstruction(sessionId: string): Promise<ReconstructionDTO> | undefined {
+    return this.inflightReconstructions.get(sessionId);
+  }
+
+  setInflightReconstruction(sessionId: string, promise: Promise<ReconstructionDTO>): void {
+    this.inflightReconstructions.set(sessionId, promise);
+  }
+
+  clearInflightReconstruction(sessionId: string): void {
+    this.inflightReconstructions.delete(sessionId);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -519,6 +564,7 @@ interface StoredSessionData {
   roomImages?: Record<string, string | null>;
   npcPortraits?: Record<string, string | null>;
   openingReady?: boolean;
+  reconstruction?: ReconstructionDTO | null;
 }
 
 function serializeSession(session: SessionData): StoredSessionData {
@@ -563,6 +609,7 @@ function serializeSession(session: SessionData): StoredSessionData {
     roomImages: session.roomImages,
     npcPortraits: session.npcPortraits,
     openingReady: session.openingReady,
+    reconstruction: session.reconstruction,
   };
 }
 
@@ -617,6 +664,7 @@ function deserializeSession(data: StoredSessionData): SessionData {
     roomImages: data.roomImages ?? {},
     npcPortraits: data.npcPortraits ?? {},
     openingReady: data.openingReady ?? false,
+    reconstruction: data.reconstruction ?? null,
   };
 }
 
@@ -745,6 +793,11 @@ export class FirestoreSessionStore extends MemorySessionStore {
 
   override markOpeningReady(sessionId: string): void {
     super.markOpeningReady(sessionId);
+    void this.sync(sessionId);
+  }
+
+  override setReconstruction(sessionId: string, data: ReconstructionDTO): void {
+    super.setReconstruction(sessionId, data);
     void this.sync(sessionId);
   }
 }
