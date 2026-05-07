@@ -93,6 +93,58 @@ export const T = {
     noMessages: 'Henüz bir mesaj yok',
   },
 
+  evidence: {
+    title: 'Kanıt Tahtası',
+    subtitle: 'Takımın paylaşılan notları',
+    placeholder: 'Bir kanıt veya düşünce paylaş…',
+    noMessages: 'Henüz bir not yok. İlk düşünceyi sen paylaş.',
+    send: 'Gönder',
+  },
+
+  voice: {
+    section: 'Sesli Sohbet',
+    hotkeyHint: 'Konuşmak için V tuşunu basılı tut.',
+    input: 'Mikrofon',
+    output: 'Hoparlör',
+    systemDefault: 'Sistem varsayılanı',
+    ready: 'Hazır',
+    connecting: 'Bağlanıyor…',
+    denied: 'İzin yok',
+    unsupported: 'Desteklenmiyor',
+  },
+
+  tutorial: {
+    title: 'Hızlı Tur',
+    stepOf: 'Adım {n} / {total}',
+    next: 'İleri',
+    prev: 'Geri',
+    skip: 'Atla',
+    finish: 'Bitir',
+    replayButton: 'Tanıtımı Tekrar Göster',
+    steps: {
+      turn: {
+        title: 'Tur Sayacı',
+        body: 'Kalan tur sayını buradan takip et. Yeşilden kırmızıya geçtikçe zamanın azalıyor demektir.',
+      },
+      chat: {
+        title: 'Anlatıcı & Sohbet',
+        body: 'Hikaye buradan akıyor. Açılış metni en üstte; senin ve takımın aksiyonları sonra geliyor.',
+      },
+      input: {
+        title: 'Aksiyonun',
+        body: 'Ne yapmak istediğini buraya yaz. Kısa ve net olsun: "Kapıyı aç", "Barmenle konuş" gibi.',
+      },
+      accuse: {
+        title: 'Suçlama',
+        body: 'Katili bulduğunu düşünüyorsan buradan suçlama başlat. Takımın oybirliğiyle karar verir.',
+      },
+      settings: {
+        title: 'Ses & Ayarlar',
+        body: 'Müzik, ses efektleri ve sesli sohbet (V tuşuyla konuşma) ayarları burada. Tanıtımı buradan tekrar açabilirsin.',
+      },
+    },
+  },
+
   accuse: {
     title: 'Suçlama Öner',
     subtitle: 'Kimin yaptığını düşünüyorsun ve hangi kanıtla?',

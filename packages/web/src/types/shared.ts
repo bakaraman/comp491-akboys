@@ -95,6 +95,28 @@ export interface ClientToServerEvents {
     data: { sessionId: string; playerId: string; hostPrompt: string },
     callback: (response: { success: boolean; error?: string }) => void,
   ) => void;
+
+  /* ---- Voice chat (V-key walkie-talkie) ---- */
+  'voice:join': (data: { sessionId: string; playerId: string }) => void;
+  'voice:leave': (data: { sessionId: string; playerId: string }) => void;
+  'voice:offer': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  'voice:answer': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  'voice:ice-candidate': (data: {
+    sessionId: string;
+    fromPlayerId: string;
+    toPlayerId: string;
+    candidate: { candidate: string; sdpMid: string | null; sdpMLineIndex: number | null } | null;
+  }) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,5 +290,22 @@ export interface ServerToClientEvents {
   'turn:updated': (data: {
     turnCount: number;
     maxTurns: number;
+  }) => void;
+
+  /* ---- Voice chat (V-key walkie-talkie) ---- */
+  'voice:participants': (data: { peerIds: string[] }) => void;
+  'voice:peer-joined': (data: { peerId: string }) => void;
+  'voice:peer-left': (data: { peerId: string }) => void;
+  'voice:offer': (data: {
+    fromPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  'voice:answer': (data: {
+    fromPlayerId: string;
+    sdp: { type: string; sdp: string };
+  }) => void;
+  'voice:ice-candidate': (data: {
+    fromPlayerId: string;
+    candidate: { candidate: string; sdpMid: string | null; sdpMLineIndex: number | null } | null;
   }) => void;
 }

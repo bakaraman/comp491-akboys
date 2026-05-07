@@ -24,6 +24,8 @@ import { T } from '@/lib/tr';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
+import { useVoiceChat } from '@/hooks/useVoiceChat';
+import { TutorialOverlay, hasSeenTutorial, clearTutorialSeen } from '@/components/TutorialOverlay';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
@@ -111,6 +113,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ---- Multiplayer hook (always called, but only used if multiplayer) ---- */
   const mp = useMultiplayerSession(sessionId, isMultiplayer);
 
+  /* ---- Voice chat (#48) — V-key walkie-talkie mesh.
+   *  Active from the moment the player has joined the multiplayer
+   *  session: lobby + voting + playing + ended. Players coordinate
+   *  before the game starts and debrief after the finale. */
+  const voice = useVoiceChat({
+    sessionId,
+    myPlayerId: mp.myPlayerId,
+    enabled: isMultiplayer && !!mp.myPlayerId,
+  });
+
   /* Music lives only inside OpeningCinematic + FinaleCinematic overlays */
 
   /* Auto-refresh session info when MP game transitions to playing state
@@ -129,6 +141,32 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isAccuseOpen, setIsAccuseOpen] = useState(false);
   const [openingDismissed, setOpeningDismissed] = useState(false);
+
+  /* ---- Tutorial overlay (#49) — show on first playing-state, replayable from Settings ---- */
+  const [tutorialVisible, setTutorialVisible] = useState(false);
+  const tutorialAutoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    // Auto-trigger once when gameplay UI becomes visible: gameState is
+    // 'playing' AND opening cinematic has been dismissed. The ref guard
+    // ensures we only auto-show once per page mount.
+    if (
+      mp.gameState === 'playing'
+      && openingDismissed
+      && !tutorialAutoTriggeredRef.current
+      && !hasSeenTutorial()
+    ) {
+      tutorialAutoTriggeredRef.current = true;
+      // Small delay so the cinematic fade-out finishes first.
+      const t = setTimeout(() => setTutorialVisible(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [isMultiplayer, mp.gameState, openingDismissed]);
+
+  const replayTutorial = useCallback(() => {
+    clearTutorialSeen();
+    setTutorialVisible(true);
+  }, []);
 
   /* ---- A.2: Audio side effects ----
    * Three independent ambient layers must never overlap:
@@ -367,6 +405,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             const color = remaining <= 4 ? '#cf5b5b' : remaining <= 9 ? '#d4a843' : '#7a9ab8';
             return (
               <span
+                data-tutorial="turn-counter"
                 title={`${remaining} tur kaldı`}
                 style={{
                   fontSize: '11px',
@@ -386,12 +425,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CopyLinkButton compact />
-          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted */}
-          <SettingsPopover />
-          {/* Communication button */}
+          {/* A.2: Audio settings — ambient + SFX volume/mute, persisted.
+              #48: Voice section is wired in session pages so users can pick
+              their mic/speaker; on home/lobby pages SettingsPopover is
+              rendered without `voice` and the Voice section is hidden. */}
+          <SettingsPopover voice={voice} onReplayTutorial={replayTutorial} />
+          {/* Evidence Board button (#48 — repurposed from old comm panel) */}
           <button
             onClick={() => setCommOpen(true)}
-            title="Communication"
+            title={T.evidence.title}
             style={{
               position: 'relative', display: 'flex', alignItems: 'center', gap: '5px',
               padding: '6px 12px', backgroundColor: 'transparent',
@@ -399,18 +441,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               color: '#6a6050', fontSize: '11px', fontFamily: 'monospace',
               letterSpacing: '0.5px', cursor: 'pointer', transition: 'all 0.2s',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#5ba3cf'; e.currentTarget.style.color = '#5ba3cf'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d4a843'; e.currentTarget.style.color = '#d4a843'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
           >
+            {/* Clipboard / pinboard glyph */}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <rect x="4" y="4" width="16" height="18" rx="2" />
+              <path d="M9 4h6v3H9z" />
+              <line x1="8" y1="11" x2="16" y2="11" />
+              <line x1="8" y1="15" x2="14" y2="15" />
             </svg>
-            Chat
+            {T.evidence.title}
             {mp.unreadComm > 0 && (
               <span style={{
                 position: 'absolute', top: '-4px', right: '-4px',
                 width: '16px', height: '16px', borderRadius: '50%',
-                backgroundColor: '#5ba3cf', color: '#0a0a0a',
+                backgroundColor: '#d4a843', color: '#0a0a0a',
                 fontSize: '9px', fontWeight: 'bold',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
@@ -436,6 +482,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
           >Map</button>
           <button
+            data-tutorial="accuse-button"
             onClick={() => setIsAccuseOpen(true)}
             style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #7a3232', borderRadius: '6px', color: '#d46868', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d46868'; e.currentTarget.style.color = '#e88080'; }}
@@ -449,7 +496,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+      <div ref={scrollRef} data-tutorial="chat-area" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {mp.messages.map((msg) => (
           <ChatMessage
             key={msg.id}
@@ -500,7 +547,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       <ChatInput onSend={mp.sendAction} onTypingChange={mp.sendTyping} playerName={myPlayer?.name} />
 
-      <PlayerSidebar players={mp.players} myPlayerId={mp.myPlayerId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <PlayerSidebar
+        players={mp.players}
+        myPlayerId={mp.myPlayerId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        talkingPlayerIds={voice.talkingPeerIds}
+        selfTransmitting={voice.isTransmitting}
+      />
+
+      {/* #49: First-run tutorial overlay (auto on first playing, replayable from Settings) */}
+      <TutorialOverlay
+        visible={tutorialVisible}
+        onClose={() => setTutorialVisible(false)}
+      />
 
       <CommPanel
         isOpen={commOpen}

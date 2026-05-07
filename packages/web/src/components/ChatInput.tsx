@@ -67,7 +67,7 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
   const isDisabled = disabled || !text.trim();
 
   return (
-    <form onSubmit={handleSubmit} style={{
+    <form data-tutorial="action-input" onSubmit={handleSubmit} style={{
       display: 'flex',
       gap: '12px',
       padding: '20px 24px',
