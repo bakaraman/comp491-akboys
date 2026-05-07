@@ -21,7 +21,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { T } from '@/lib/tr';
 
 const STORAGE_KEY = 'velvet-tutorial-seen';
@@ -87,28 +87,49 @@ function defaultSteps(): TutorialStep[] {
 export function TutorialOverlay({
   visible,
   onClose,
-  steps = defaultSteps(),
+  steps,
 }: TutorialOverlayProps): React.ReactElement | null {
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
 
-  const current = steps[stepIndex];
-  const total = steps.length;
+  // Memoize steps so the `current` reference is stable across renders.
+  // Without this, the parameter default would build a fresh array on
+  // every render, breaking referential equality and triggering an
+  // infinite recompute → setState → render loop.
+  const stepsToUse = useMemo(() => steps ?? defaultSteps(), [steps]);
+  const current = stepsToUse[stepIndex];
+  const total = stepsToUse.length;
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === total - 1;
 
   /* ---- Compute target rect on step change + window resize ---- */
   const recompute = useCallback(() => {
     if (!visible || !current) {
-      setTargetRect(null);
+      setTargetRect((prev) => (prev === null ? prev : null));
       return;
     }
     const el = document.querySelector(`[data-tutorial="${current.target}"]`) as HTMLElement | null;
     if (!el) {
-      setTargetRect(null);
+      setTargetRect((prev) => (prev === null ? prev : null));
       return;
     }
-    setTargetRect(el.getBoundingClientRect());
+    const next = el.getBoundingClientRect();
+    setTargetRect((prev) => {
+      // getBoundingClientRect always returns a fresh DOMRect object even
+      // when dimensions are unchanged. Only commit a new state value when
+      // the rectangle actually moved/resized — otherwise we churn renders
+      // and (combined with the 400ms poll) hit React's update-depth limit.
+      if (
+        prev
+        && prev.top === next.top
+        && prev.left === next.left
+        && prev.width === next.width
+        && prev.height === next.height
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [visible, current]);
 
   useLayoutEffect(() => {
