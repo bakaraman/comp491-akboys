@@ -7,7 +7,8 @@
  *
  * Supports: roles (#18), NPC shared memory (#19), MP game end (#25),
  *           evidence chains (#26), evidence fix (#27), sanity (#38),
- *           NPC movement (#39), secret rooms (#40).
+ *           NPC movement (#39), secret rooms (#40),
+ *           payload validation (#53), spectator mode (#52).
  *
  * @author AKBOYS Team
  * @since 2026-03-23
@@ -28,6 +29,25 @@ import { toPlayerDTO, SCENARIOS } from '@akboys/shared';
 import type { SessionStore, SessionData } from '../store/SessionStore.js';
 import { nextPlayerColor, serializeVotes } from '../store/SessionStore.js';
 import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
+import {
+  validatePayload,
+  PlayerJoinSchema,
+  PlayerActionSchema,
+  PlayerTypingSchema,
+  PlayerRejoinSchema,
+  GameStartSchema,
+  ScenarioSelectSchema,
+  ScenarioVoteSchema,
+  ScenarioConfirmSchema,
+  CommRoomSchema,
+  CommDirectSchema,
+  EvidenceShareSchema,
+  PlayerSelectRoleSchema,
+  ProposeAccusationSchema,
+  VoteAccusationSchema,
+  StoryGenerateSchema,
+  SpectatorJoinSchema,
+} from './payload-schemas.js';
 import {
   buildPlayerActionPrompt,
   buildOpeningPrompt,
@@ -55,6 +75,9 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
 /** Maps a socket ID to the session and player it belongs to */
 const socketMap = new Map<string, { sessionId: string; playerId: string }>();
+
+/** Socket IDs that joined as read-only spectators (Issue #52) */
+const spectatorSockets = new Set<string>();
 
 /**
  * Pending disconnect timers keyed by playerId. If the player reconnects within
@@ -257,6 +280,21 @@ function performNPCMovement(session: SessionData, scenario: Scenario): void {
 /* ------------------------------------------------------------------ */
 /*  Public: register all handlers on the io instance                   */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Maps spectator socket ID → sessionId so we can count per-session.
+ * Cleaned up on disconnect.
+ */
+const spectatorSessionMap = new Map<string, string>();
+
+/** Count spectators currently watching a session */
+function countSpectators(sessionId: string): number {
+  let n = 0;
+  for (const sid of spectatorSessionMap.values()) {
+    if (sid === sessionId) n++;
+  }
+  return n;
+}
 
 export function registerSocketHandlers(io: GameServer, store: SessionStore): void {
 
@@ -529,9 +567,52 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
   io.on('connection', (socket: GameSocket) => {
     console.log(`[socket] connected: ${socket.id}`);
 
+    /* ---- spectator:join (#52) ---- */
+    socket.on('spectator:join' as never, (data: unknown) => {
+      const v = validatePayload(SpectatorJoinSchema, data, 'spectator:join');
+      if (!v.ok) { socket.emit('session:error', { message: 'INVALID_PAYLOAD' }); return; }
+      const { sessionId } = v.data;
+      const session = store.get(sessionId);
+      if (!session) { socket.emit('session:error', { message: 'SESSION_NOT_FOUND' }); return; }
+      spectatorSockets.add(socket.id);
+      spectatorSessionMap.set(socket.id, sessionId);
+      socket.join(sessionId);
+      // Send current session state (full history visible to spectators)
+      const spectatorScenario = getScenarioForSession(session);
+      const spectatorPlayers = getAllPlayerDTOs(store, sessionId);
+      socket.emit('session:state', {
+        session: {
+          id: session.id,
+          scenarioId: session.scenarioId,
+          scenarioTitle: spectatorScenario?.title || 'Unknown',
+          roomCode: session.roomCode,
+          players: spectatorPlayers,
+          history: session.history.map((m) => ({
+            role: m.role,
+            content: m.content,
+            playerId: m.playerId,
+            playerName: m.playerName,
+            playerColor: m.playerColor,
+            messageType: m.messageType,
+          })),
+          state: session.state,
+          selectedScenarioId: session.selectedScenarioId,
+          scenarioVotes: serializeVotes(session),
+          commHistory: [],
+          sharedEvidence: session.sharedEvidence || [],
+          turnCount: session.mpTurnCount,
+          maxTurns: spectatorScenario?.maxTurns,
+          spectatorCount: countSpectators(sessionId),
+        },
+      });
+      console.log(`[socket] spectator joined session ${sessionId.slice(0, 8)}`);
+    });
+
     /* ---- player:join ---- */
     socket.on('player:join', (data, callback) => {
-      const { sessionId, playerName } = data;
+      const v = validatePayload(PlayerJoinSchema, data, 'player:join');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerName } = v.data;
 
       const session = store.get(sessionId);
       if (!session) {
@@ -613,7 +694,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     /* ---- player:action ---- */
     socket.on('player:action', (data) => {
-      const { sessionId, playerId, message } = data;
+      // Spectators must not be able to send actions (#52)
+      if (spectatorSockets.has(socket.id)) return;
+
+      const v = validatePayload(PlayerActionSchema, data, 'player:action');
+      if (!v.ok) { socket.emit('session:error', { message: 'INVALID_PAYLOAD' }); return; }
+      const { sessionId, playerId, message } = v.data;
 
       const session = store.get(sessionId);
       if (!session) return;
@@ -666,7 +752,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     /* ---- player:typing ---- */
     socket.on('player:typing', (data) => {
-      const { sessionId, playerId, isTyping } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(PlayerTypingSchema, data, 'player:typing');
+      if (!v.ok) return;
+      const { sessionId, playerId, isTyping } = v.data;
       const player = store.getPlayer(sessionId, playerId);
       if (!player) return;
 
@@ -682,7 +771,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('player:select-role', (data, callback) => {
-      const { sessionId, playerId, role } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot act' }); return; }
+      const v = validatePayload(PlayerSelectRoleSchema, data, 'player:select-role');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId, role } = v.data;
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
       if (session.state === 'playing') { callback({ success: false, error: 'Cannot change role during game' }); return; }
@@ -715,7 +807,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     /* ---- comm:room — message to all players in sender's room ---- */
     socket.on('comm:room', (data) => {
-      const { sessionId, playerId, content } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(CommRoomSchema, data, 'comm:room');
+      if (!v.ok) { socket.emit('session:error', { message: 'INVALID_PAYLOAD' }); return; }
+      const { sessionId, playerId, content } = v.data;
       const session = store.get(sessionId);
       if (!session) return;
 
@@ -761,7 +856,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
     /* ---- comm:direct — targeted message to a specific player ---- */
     socket.on('comm:direct', (data) => {
-      const { sessionId, playerId, targetPlayerId, content } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(CommDirectSchema, data, 'comm:direct');
+      if (!v.ok) { socket.emit('session:error', { message: 'INVALID_PAYLOAD' }); return; }
+      const { sessionId, playerId, targetPlayerId, content } = v.data;
       const session = store.get(sessionId);
       if (!session) return;
 
@@ -810,7 +908,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('evidence:share', (data) => {
-      const { sessionId, playerId, evidenceId } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(EvidenceShareSchema, data, 'evidence:share');
+      if (!v.ok) { socket.emit('session:error', { message: 'INVALID_PAYLOAD' }); return; }
+      const { sessionId, playerId, evidenceId } = v.data;
       const session = store.get(sessionId);
       if (!session || session.state !== 'playing') return;
 
@@ -851,7 +952,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('scenario:select', (data) => {
-      const { sessionId, playerId, scenarioId } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(ScenarioSelectSchema, data, 'scenario:select');
+      if (!v.ok) return;
+      const { sessionId, playerId, scenarioId } = v.data;
       const session = store.get(sessionId);
       if (!session || session.state !== 'voting') return;
 
@@ -869,7 +973,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     });
 
     socket.on('scenario:vote', (data) => {
-      const { sessionId, playerId, scenarioId } = data;
+      if (spectatorSockets.has(socket.id)) return;
+      const v = validatePayload(ScenarioVoteSchema, data, 'scenario:vote');
+      if (!v.ok) return;
+      const { sessionId, playerId, scenarioId } = v.data;
       const session = store.get(sessionId);
       if (!session || session.state !== 'voting') return;
 
@@ -898,7 +1005,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     });
 
     socket.on('scenario:confirm', (data, callback) => {
-      const { sessionId, playerId, scenarioId } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot act' }); return; }
+      const v = validatePayload(ScenarioConfirmSchema, data, 'scenario:confirm');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId, scenarioId } = v.data;
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
       if (session.state !== 'voting') { callback({ success: false, error: 'Not in voting phase' }); return; }
@@ -925,7 +1035,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('story:generate', async (data, callback) => {
-      const { sessionId, playerId, hostPrompt } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot act' }); return; }
+      const v = validatePayload(StoryGenerateSchema, data, 'story:generate');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId, hostPrompt } = v.data;
 
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
@@ -1044,7 +1157,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     });
 
     socket.on('game:start', async (data, callback) => {
-      const { sessionId, playerId } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot act' }); return; }
+      const v = validatePayload(GameStartSchema, data, 'game:start');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId } = v.data;
 
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
@@ -1150,7 +1266,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('player:propose-accusation', (data, callback) => {
-      const { sessionId, playerId, suspectId } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot act' }); return; }
+      const v = validatePayload(ProposeAccusationSchema, data, 'player:propose-accusation');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId, suspectId } = v.data;
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
       if (session.state !== 'playing') { callback({ success: false, error: 'Game not in progress' }); return; }
@@ -1199,7 +1318,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     });
 
     socket.on('player:vote-accusation', (data, callback) => {
-      const { sessionId, playerId, vote } = data;
+      if (spectatorSockets.has(socket.id)) { callback({ success: false, error: 'Spectators cannot vote' }); return; }
+      const v = validatePayload(VoteAccusationSchema, data, 'player:vote-accusation');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId, vote } = v.data;
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
       if (!session.activeAccusation) { callback({ success: false, error: 'No active vote' }); return; }
@@ -1231,7 +1353,9 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     /* ================================================================ */
 
     socket.on('player:rejoin', (data, callback) => {
-      const { sessionId, playerId } = data;
+      const v = validatePayload(PlayerRejoinSchema, data, 'player:rejoin');
+      if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
+      const { sessionId, playerId } = v.data;
 
       const session = store.get(sessionId);
       if (!session) { callback({ success: false, error: 'Session not found' }); return; }
@@ -1291,6 +1415,14 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     });
 
     socket.on('disconnect', () => {
+      // Clean up spectator tracking
+      if (spectatorSockets.has(socket.id)) {
+        spectatorSockets.delete(socket.id);
+        spectatorSessionMap.delete(socket.id);
+        console.log(`[socket] spectator disconnected: ${socket.id}`);
+        return;
+      }
+
       const mapping = socketMap.get(socket.id);
       if (!mapping) return;
 
