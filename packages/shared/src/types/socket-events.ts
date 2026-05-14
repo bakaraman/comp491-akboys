@@ -8,7 +8,7 @@
  * @since 2026-03-23
  */
 
-import type { PlayerData, PlayerRole } from './game.js';
+import type { Bilingual, Locale, PlayerData, PlayerRole } from './game.js';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs (Data Transfer Objects)                                       */
@@ -26,6 +26,8 @@ export interface PlayerDataDTO {
   visitedRooms: string[];
   isConnected: boolean;
   color: string;
+  /** Player's UI/narration language (#58) */
+  locale: Locale;
 }
 
 /** A communication message between players (NOT narrator) */
@@ -85,7 +87,7 @@ export interface SessionStateDTO {
 
 export interface ClientToServerEvents {
   'player:join': (
-    data: { sessionId: string; playerName: string },
+    data: { sessionId: string; playerName: string; locale?: Locale },
     callback: (response: { success: boolean; playerId?: string; error?: string }) => void,
   ) => void;
 
@@ -209,11 +211,11 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   'game:started': (data: {
     sessionId: string;
-    scenarioTitle: string;
+    /** Bilingual scenario title (#58). */
+    scenarioTitle: Bilingual;
     players: PlayerDataDTO[];
-    /** C.1: shared opening narration so clients can render it immediately
-     *  without waiting for a session:state refetch (F5). */
-    openingNarration?: string;
+    /** C.1 + #58: bilingual opening narration so each client renders in its own locale. */
+    openingNarration?: Bilingual;
   }) => void;
 
   /** Scoped narrator streaming — only the target player receives it */
@@ -361,19 +363,20 @@ export interface ServerToClientEvents {
   'story:ready': (data: {
     openingImageUrl: string | null;
     world: {
-      title: string;
-      setting: string;
-      openingNarration: string;
+      /** #58: bilingual — each client reads via pickLang(field, locale). */
+      title: Bilingual;
+      setting: Bilingual;
+      openingNarration: Bilingual;
     };
-    /** Roster of rooms for the minimap. */
+    /** Roster of rooms for the minimap. Names are proper nouns (single string). */
     rooms: Array<{
       id: string;
       name: string;
       exits: Record<string, string | null>;
     }>;
-    /** Roster of NPCs. */
-    npcs: Array<{ id: string; name: string; role: string }>;
-    /** Roster of all evidence items (for accuse modal). */
+    /** Roster of NPCs. role is bilingual (#58). */
+    npcs: Array<{ id: string; name: string; role: Bilingual }>;
+    /** Roster of all evidence items (for accuse modal). Names are proper nouns. */
     evidenceItems: Array<{ id: string; name: string }>;
   }) => void;
 
@@ -430,5 +433,6 @@ export function toPlayerDTO(p: PlayerData): PlayerDataDTO {
     visitedRooms: [...p.visitedRooms],
     isConnected: p.isConnected,
     color: p.color,
+    locale: p.locale ?? 'tr',
   };
 }

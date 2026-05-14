@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useT } from '@/hooks/useLocale';
 
 interface CopyLinkButtonProps {
   /** Optional custom style override */
@@ -18,6 +19,7 @@ interface CopyLinkButtonProps {
 }
 
 export function CopyLinkButton({ compact }: CopyLinkButtonProps) {
+  const T = useT();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -81,7 +83,7 @@ export function CopyLinkButton({ compact }: CopyLinkButtonProps) {
             </>
           )}
         </svg>
-        {copied ? 'Copied!' : 'Invite'}
+        {copied ? T.game.copied : T.game.invite}
       </button>
     );
   }

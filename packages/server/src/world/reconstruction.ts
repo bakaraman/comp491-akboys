@@ -29,6 +29,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
+import { pickLang } from '@akboys/shared';
 import type { WorldData, ReconstructionDTO, ReconstructionEvent } from '@akboys/shared';
 
 const DEBUG = '[reconstruction]';
@@ -53,7 +54,7 @@ interface RawEvents {
     time: string;
     roomId: string;
     actorNpcId: string;
-    description: string;
+    description: { tr: string; en: string };
     isCulpritAction: boolean;
   }>;
 }
@@ -77,11 +78,10 @@ function buildEventsSchema(world: WorldData): z.ZodType<RawEvents> {
           actorNpcId: ActorIdEnum.describe(
             'MUST be one of the listed NPC ids, or "" for a beat with no specific actor.',
           ),
-          description: z
-            .string()
-            .min(15)
-            .max(200)
-            .describe('1-2 short Turkish sentences. Use ONLY display names — never ids or snake_case.'),
+          description: z.object({
+            tr: z.string().min(15).max(200).describe('1-2 short Turkish sentences. Use ONLY display names — never ids or snake_case.'),
+            en: z.string().min(15).max(200).describe('English version — semantically identical to Turkish, same details and tone.'),
+          }).describe('Bilingual beat description (#58).'),
           isCulpritAction: z
             .boolean()
             .describe('True when this beat is the killer doing something pivotal.'),
@@ -102,24 +102,24 @@ function buildEventsPrompt(world: WorldData, worldStateLog: string[]): { system:
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
 
   const roomsBlock = world.rooms
-    .map((r) => `  • ${r.name} — ${r.description}  [id: ${r.id}]`)
+    .map((r) => `  • ${r.name} — ${pickLang(r.description, 'tr')}  [id: ${r.id}]`)
     .join('\n');
 
   const npcsBlock = world.npcs
     .map((n) => {
       const culpritFlag = n.id === world.solution.culpritNpcId ? '  ★KATİL★' : '';
       const lines = [
-        `  • ${n.name} — ${n.role}${culpritFlag}  [id: ${n.id}]`,
-        `      bildiği gerçek: ${n.knownInfo}`,
+        `  • ${n.name} — ${pickLang(n.role, 'tr')}${culpritFlag}  [id: ${n.id}]`,
+        `      bildiği gerçek: ${pickLang(n.knownInfo, 'tr')}`,
       ];
-      if (n.hiddenSecret) lines.push(`      gizli sırrı: ${n.hiddenSecret}`);
+      if (n.hiddenSecret) lines.push(`      gizli sırrı: ${pickLang(n.hiddenSecret, 'tr')}`);
       return lines.join('\n');
     })
     .join('\n');
 
   const itemsBlock = world.items
     .map((i) => {
-      const tag = i.isRedHerring ? ' (YANILTICI KANIT)' : i.isEvidence ? ' (KANIT)' : '';
+      const tag = i.isRedHerring ? ' (YANILTICI KANIT / RED HERRING)' : i.isEvidence ? ' (KANIT / EVIDENCE)' : '';
       return `  • ${i.name}${tag}`;
     })
     .join('\n');
@@ -128,49 +128,50 @@ function buildEventsPrompt(world: WorldData, worldStateLog: string[]): { system:
     ? `OYUNCU AKSİYONLARI (gerçekten olan, en yenisi altta):\n${worldStateLog.slice(-30).map((e) => `  - ${e}`).join('\n')}`
     : 'OYUNCU AKSİYONLARI: (kayıt yok)';
 
-  const system = `Sen, biten bir cinayet gizemi oyununun "olay yerini yeniden canlandırma" anlatıcısısın.
+  const system = `You are the "crime-scene reconstruction" narrator for a finished mystery game. The same world is played by Turkish and English speakers in the same session, so every beat's description must be produced in BOTH languages (#58).
 
-GÖREVİN:
-- Cinayetin GERÇEK timeline'ını kronolojik 6-8 olay halinde üret.
-- Olaylar Türkçe, her biri 1-2 KISA cümle.
-- KATİL VE MOTİV ZATEN VERİLDİ — değiştirme, sorgulama, alternatif önerme. Sadece anlat.
-- Olay sırası mantıklı bir saatle kronolojik olsun (örn. 22:30, 22:45, 23:00).
-- Katilin hareketleri (zehir koyma, kanıt yakma, kaçış) için isCulpritAction: true.
-- Ortam betimlemesi veya kurban'ın son anı gibi kişi-yok beat'ler için actorNpcId: "" (boş string).
-- Stil: kısa, somut, gazeteci raporu gibi. Süsleme yok. Pamuk değil.
-- DİKKAT: YANILTICI KANIT olarak işaretlenmiş eşyalar gerçek kanıt değil, dedektifleri şaşırtmak için konulmuş tuzaklardı. Bunları timeline'da gerekirse "bir yanlış yönlendirmeydi" olarak belirtebilirsin.
+TASK:
+- Produce the REAL timeline of the crime as 6-8 chronological beats.
+- Each beat has a SHORT description in BOTH Turkish AND English (1-2 sentences each).
+- The English MUST be semantically identical to the Turkish — same details, same tone. Native English, not literal translation.
+- THE CULPRIT AND MOTIVE ARE ALREADY GIVEN — do not change them, question them, or suggest alternatives. Just retell.
+- Beats should follow a believable clock (e.g. 22:30, 22:45, 23:00).
+- Culprit-driven beats (poisoning, evidence destruction, escape) get isCulpritAction: true.
+- Atmospheric beats or the victim's last moment use actorNpcId: "" (empty string).
+- Style: short, concrete, journalist-report tone. No ornament. Plain prose.
+- WATCH OUT: items tagged YANILTICI KANIT / RED HERRING are NOT the real evidence — they are deliberate misdirections. If you mention one, you can frame it as the false lead.
 
-İSİM KURALI (ÇOK ÖNEMLİ):
-- description alanlarında SADECE OKUNABILIR TÜRKÇE İSİMLER kullan.
-- ASLA snake_case yazma. ASLA "_" karakteri içeren id yazma.
-  Yanlış: "back_hall", "leo_marcus", "cufflink_with_velvet_fiber"
-  Doğru:  "Arka Koridor", "Leo Marcus", "Kadife Lifli Kol Düğmesi"
-- ID'ler yalnızca roomId / actorNpcId JSON alanlarına gider — metin içine ASLA.
+NAME RULE (CRITICAL):
+- In description.tr and description.en, use ONLY readable proper-noun names — never ids, never snake_case.
+  Wrong: "back_hall", "leo_marcus", "cufflink_with_velvet_fiber"
+  Right: "Arka Koridor" / "Back Hall", "Leo Marcus", "Kadife Lifli Kol Düğmesi" / "Cufflink with Velvet Fiber"
+- Proper-noun names listed below are the SAME in both languages. Do not translate them.
+- IDs only go in roomId / actorNpcId JSON fields — never inside description text.
 
-ÇIKTI: yalnızca strict JSON, başka açıklama yok. (Sonuç paragrafı bu çağrıda YOK.)`;
+OUTPUT: strict JSON only. No commentary. (Conclusion paragraph is NOT in this call.)`;
 
-  const user = `DÜNYA: ${world.meta.title}
-ZEMİN: ${world.meta.setting}
+  const user = `DÜNYA / WORLD: ${pickLang(world.meta.title, 'tr')} | ${pickLang(world.meta.title, 'en')}
+ZEMİN / SETTING: ${pickLang(world.meta.setting, 'tr')} | ${pickLang(world.meta.setting, 'en')}
 
-GERÇEK KATİL: ${culprit?.name ?? 'unknown'} (rol: ${culprit?.role ?? '?'}) [katil id: ${world.solution.culpritNpcId}]
-GERÇEK MOTİV: ${world.solution.motiveShort}
-ANAHTAR KANIT: ${keyEv?.name ?? 'unknown'}
+GERÇEK KATİL / TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (rol/role: ${culprit ? pickLang(culprit.role, 'tr') : '?'}) [id: ${world.solution.culpritNpcId}]
+GERÇEK MOTİV / TRUE MOTIVE: ${pickLang(world.solution.motiveShort, 'tr')} | ${pickLang(world.solution.motiveShort, 'en')}
+ANAHTAR KANIT / KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}
 
-ODALAR (her olay bu listedeki bir oda olmalı; metinde ODA ADINI yaz):
+ROOMS (each beat must reference one of these; use the proper-noun name in text, never the id):
 ${roomsBlock}
 
-KARAKTERLER (her actor bu listeden seçilmeli; metinde KARAKTER ADINI yaz):
+CHARACTERS (each actor must come from this list; use the proper-noun name in text, never the id):
 ${npcsBlock}
 
-EŞYALAR (metinde isim olarak geçebilir):
+ITEMS (may be referenced by name):
 ${itemsBlock}
 
 ${logBlock}
 
-Şimdi cinayetin gerçek timeline'ını üret. Kronolojik 6-8 olay, Türkçe.
-- Her olay yalnızca yukarıdaki listelerden roomId ve actorNpcId kullansın.
-- description'da sadece okunabilir Türkçe isimler kullan, ID veya snake_case yazma.
-- Sonuç paragrafı bu çağrıda YOK — sadece events array'i doldur.`;
+Now produce the real timeline of the crime. 6-8 chronological beats. Each description must have BOTH tr and en filled in — same content, two languages.
+- Only use roomId and actorNpcId values from the lists above.
+- Inside description.tr / description.en, use only readable proper-noun names, never ids or snake_case.
+- No conclusion paragraph in this call — only fill the events array.`;
 
   return { system, user };
 }
@@ -213,36 +214,37 @@ function buildScrubber(world: WorldData): (text: string) => string {
 async function generateConclusionText(
   world: WorldData,
   events: ReconstructionEvent[],
-): Promise<string> {
+): Promise<{ tr: string; en: string }> {
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
 
   const eventsBlock = events
     .map((e, i) => {
       const actorPart = e.actorName ? ` ${e.actorName}` : '';
-      return `${i + 1}. ${e.time} — ${e.roomName}:${actorPart} ${e.description}`;
+      return `${i + 1}. ${e.time} — ${e.roomName}:${actorPart} TR: ${pickLang(e.description, 'tr')} | EN: ${pickLang(e.description, 'en')}`;
     })
     .join('\n');
 
-  const system = `Sen kısa Türkçe noir polisiye anlatıcısısın. Görevin: verilen olay zincirinden 3-4 cümlelik bir KAPANIŞ paragrafı yazmak.
+  const system = `You are a concise noir mystery narrator. Your job: write a 3-4 sentence CLOSING paragraph in BOTH Turkish and English from the given event chain (#58).
 
-KESİN KURALLAR:
-- 3-4 TAM cümle. Her cümle nokta/ünlem/soru ile bitsin.
-- ASLA yarım cümle bırakma. Cümleyi tamamlamadan durma.
-- İçinde mutlaka olmalı: cinayetin nasıl işlendiği, katilin TAM ADI, motivi, anahtar kanıtın TAM ADI.
-- Sadece okunabilir Türkçe isimler. ASLA snake_case veya "_" içeren id yazma.
-- Süsleme yok, gazeteci özeti gibi sade.
-- Sadece paragrafı yaz, başlık veya açıklama yazma.`;
+STRICT RULES:
+- 3-4 COMPLETE sentences in each language. Every sentence ends with a terminal punctuation mark.
+- NEVER leave a sentence half-finished.
+- Must include: how the crime was committed, the culprit's FULL NAME, the motive, the key evidence's FULL NAME.
+- Use only readable proper-noun names — NEVER snake_case or ids with "_".
+- Plain, journalistic summary. No ornament.
+- Output a single JSON object: { "tr": "...", "en": "..." }. No headers, no explanation. Both languages must be semantically identical.`;
 
-  const user = `KATİL: ${culprit?.name ?? 'bilinmiyor'} (rol: ${culprit?.role ?? '?'})
-MOTİV: ${world.solution.motiveShort}
-ANAHTAR KANIT: ${keyEv?.name ?? 'bilinmiyor'}
-KURBAN/ZEMİN: ${world.meta.title} — ${world.meta.setting}
+  const user = `CULPRIT: ${culprit?.name ?? 'unknown'} (role TR: ${culprit ? pickLang(culprit.role, 'tr') : '?'} / role EN: ${culprit ? pickLang(culprit.role, 'en') : '?'})
+MOTIVE TR: ${pickLang(world.solution.motiveShort, 'tr')}
+MOTIVE EN: ${pickLang(world.solution.motiveShort, 'en')}
+KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}
+CASE: ${pickLang(world.meta.title, 'tr')} | ${pickLang(world.meta.title, 'en')} — ${pickLang(world.meta.setting, 'tr')} / ${pickLang(world.meta.setting, 'en')}
 
-OLAY ZİNCİRİ:
+EVENT CHAIN:
 ${eventsBlock}
 
-Şimdi yukarıdaki gerçeği özetleyen 3-4 cümlelik kapanış paragrafı yaz. Cümleyi yarıda bırakma.`;
+Now write the closing paragraph that summarises the truth above, 3-4 sentences in each language. JSON only, no other text.`;
 
   const completion = await client().chat.completions.create({
     model: CONCLUSION_MODEL,
@@ -250,8 +252,9 @@ ${eventsBlock}
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    max_tokens: CONCLUSION_MAX_TOKENS,
+    max_tokens: CONCLUSION_MAX_TOKENS * 2, // bilingual output ~2x size
     temperature: 0.55,
+    response_format: { type: 'json_object' },
   });
 
   const choice = completion.choices[0];
@@ -262,8 +265,13 @@ ${eventsBlock}
   if (finishReason === 'length') {
     console.warn(`${DEBUG} ⚠ conclusion finish_reason=length — bumping CONCLUSION_MAX_TOKENS may help`);
   }
-  console.log(`${DEBUG}   conclusion ${text.length} chars (finish=${finishReason})`);
-  return text;
+
+  const parsed = JSON.parse(text);
+  if (typeof parsed.tr !== 'string' || typeof parsed.en !== 'string') {
+    throw new Error('Conclusion JSON missing tr/en fields');
+  }
+  console.log(`${DEBUG}   conclusion tr=${parsed.tr.length}c en=${parsed.en.length}c (finish=${finishReason})`);
+  return { tr: parsed.tr.trim(), en: parsed.en.trim() };
 }
 
 /**
@@ -271,12 +279,17 @@ ${eventsBlock}
  * from solution canon so it's always coherent, just not stylistically
  * great. Better than showing the user nothing.
  */
-function fallbackConclusion(world: WorldData): string {
+function fallbackConclusion(world: WorldData): { tr: string; en: string } {
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
   const culpritName = culprit?.name ?? 'katil';
   const evidenceName = keyEv?.name ?? 'anahtar kanıt';
-  return `Cinayet, ${world.solution.motiveShort} sebebiyle işlendi. Katilin kimliği ${culpritName} olarak belirlendi. Anahtar kanıt: ${evidenceName}.`;
+  const motiveTr = pickLang(world.solution.motiveShort, 'tr');
+  const motiveEn = pickLang(world.solution.motiveShort, 'en');
+  return {
+    tr: `Cinayet, ${motiveTr} sebebiyle işlendi. Katilin kimliği ${culpritName} olarak belirlendi. Anahtar kanıt: ${evidenceName}.`,
+    en: `The crime was committed because ${motiveEn}. The killer was identified as ${culpritName}. Key evidence: ${evidenceName}.`,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,24 +339,29 @@ export async function generateReconstruction(
       roomName: room?.name ?? e.roomId,
       actorNpcId: e.actorNpcId,
       actorName: actor?.name ?? '',
-      actorRole: actor?.role ?? '',
-      description: scrub(e.description.trim()),
+      actorRole: actor ? actor.role : { tr: '', en: '' },
+      description: {
+        tr: scrub(e.description.tr.trim()),
+        en: scrub(e.description.en.trim()),
+      },
       isCulpritAction: e.isCulpritAction,
     };
   });
 
-  /* ---- Pass 2: conclusion (plain text, gpt-4o-mini) ---- */
-  let conclusion: string;
+  /* ---- Pass 2: conclusion (bilingual JSON, gpt-4o-mini) ---- */
+  let conclusion: { tr: string; en: string };
   try {
     const raw2 = await generateConclusionText(world, events);
-    conclusion = scrub(raw2);
-    // Sanity: terminator check. With gpt-4o-mini + 500 tokens this should
-    // basically never trigger — but if a network blip cuts the response,
-    // we still patch the tail rather than show a half-sentence.
-    if (!/[.!?…»"')\]]\s*$/.test(conclusion)) {
-      console.warn(`${DEBUG} ⚠ conclusion lacks terminal punctuation, appending ellipsis. tail="${conclusion.slice(-40)}"`);
-      conclusion = `${conclusion.replace(/[\s,;:—-]+$/, '')}…`;
-    }
+    const trText = scrub(raw2.tr);
+    const enText = scrub(raw2.en);
+    // Sanity: terminator check per language.
+    const patchTail = (s: string): string => {
+      if (!s) return s;
+      if (/[.!?…»"')\]]\s*$/.test(s)) return s;
+      console.warn(`${DEBUG} ⚠ conclusion lacks terminal punctuation, appending ellipsis. tail="${s.slice(-40)}"`);
+      return `${s.replace(/[\s,;:—-]+$/, '')}…`;
+    };
+    conclusion = { tr: patchTail(trText), en: patchTail(enText) };
   } catch (err) {
     console.error(`${DEBUG} conclusion call failed, using deterministic fallback`, err);
     conclusion = fallbackConclusion(world);
@@ -357,7 +375,7 @@ export async function generateReconstruction(
   };
 
   console.log(
-    `${DEBUG} ✓ ${events.length} events, ${dto.conclusion.length} char conclusion `
+    `${DEBUG} ✓ ${events.length} events, conclusion tr=${pickLang(dto.conclusion, 'tr').length}c en=${pickLang(dto.conclusion, 'en').length}c `
       + `(${Date.now() - t0}ms total, events finish=${finishReason})`,
   );
   return dto;

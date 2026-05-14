@@ -567,14 +567,20 @@ chatRouter.post('/start', requireAuth, async (req: Request, res: Response) => {
 /* ================================================================== */
 chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { text, voice } = req.body as { text?: string; voice?: string };
+    const { text, voice, locale: localeRaw } = req.body as {
+      text?: string;
+      voice?: string;
+      locale?: 'tr' | 'en';
+    };
     if (!text || typeof text !== 'string' || text.length < 2) {
       res.status(400).json({ error: 'text is required' });
       return;
     }
+    const locale: 'tr' | 'en' = localeRaw === 'en' ? 'en' : 'tr';
     const ttsRes = await streamTts({
       text,
-      voice: (voice as 'ash' | 'ballad' | 'fable' | 'verse' | 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined) ?? 'ash',
+      locale,
+      voice: voice as 'ash' | 'ballad' | 'fable' | 'verse' | 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined,
       format: 'mp3',
     });
 
@@ -594,10 +600,12 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
 /* ================================================================== */
 chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { sessionId, outcome } = req.body as {
+    const { sessionId, outcome, locale: localeRaw } = req.body as {
       sessionId?: string;
       outcome?: FinaleOutcome;
+      locale?: 'tr' | 'en';
     };
+    const locale: 'tr' | 'en' = localeRaw === 'en' ? 'en' : 'tr';
     if (!sessionId || !outcome) {
       res.status(400).json({ error: 'sessionId and outcome required' });
       return;
@@ -627,6 +635,7 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         worldStateLog: session.worldStateLog,
         turnCount: session.mpTurnCount,
         maxTurns: finaleMaxTurns,
+        locale,
       })) {
         fullText += chunk;
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);

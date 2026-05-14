@@ -14,8 +14,11 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { PlayerDataDTO, CommMessageDTO } from '@/types/shared';
+import type { Bilingual, PlayerDataDTO, CommMessageDTO } from '@/types/shared';
+import { pickLang } from '@/lib/i18n';
 import { getSocket, disconnectSocket, type GameSocket } from '../lib/socket';
+import { getCurrentLocale, useLocale } from '@/hooks/useLocale';
+import { getT } from '@/lib/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -45,18 +48,33 @@ interface StoredIdentity {
 }
 
 /* ------------------------------------------------------------------ */
-/*  localStorage helpers                                               */
+/*  Identity helpers (sessionStorage — per-tab isolation)              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * #58: identity lives in sessionStorage, not localStorage.
+ *
+ * Background: when two players on the same machine open the game in two
+ * different tabs (a common demo scenario), localStorage was shared across
+ * tabs — the second tab's join overwrote the first tab's identity, so a
+ * refresh in tab A would rejoin as tab B's player. Messages would leak
+ * across tabs as a result. sessionStorage is scoped to the browsing
+ * context (tab/window), which gives each tab its own identity store.
+ */
 const STORAGE_KEY = 'akboys_player';
 
+function getStore(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  return window.sessionStorage;
+}
+
 function saveIdentity(identity: StoredIdentity): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(identity)); } catch { /* */ }
+  try { getStore()?.setItem(STORAGE_KEY, JSON.stringify(identity)); } catch { /* */ }
 }
 
 function loadIdentity(sessionId: string): StoredIdentity | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = getStore()?.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed: StoredIdentity = JSON.parse(raw);
     return parsed.sessionId === sessionId ? parsed : null;
@@ -64,7 +82,7 @@ function loadIdentity(sessionId: string): StoredIdentity | null {
 }
 
 function clearIdentity(): void {
-  try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+  try { getStore()?.removeItem(STORAGE_KEY); } catch { /* */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +90,20 @@ function clearIdentity(): void {
 /* ------------------------------------------------------------------ */
 
 export function useMultiplayerSession(sessionId: string, enabled: boolean = true) {
+  /* #58: locale is fixed for the entire session lifecycle. Home page locks
+   * it at Create/Join time; this hook locks defensively on mount so that a
+   * mid-game refresh (which resets the in-memory cachedState) cannot leak
+   * a language change. Unlock only happens on a fresh page reload at Home.
+   *
+   * Also: localStorage `velvet-locale` is shared across browser tabs/windows
+   * for the same origin, so a second tab choosing a different locale can
+   * overwrite the value here. We treat the SERVER-authoritative
+   * `player.locale` (received over session:state / player:joined) as the
+   * single source of truth and re-sync the client whenever it diverges. */
+  const { locale, setLocale, lock: lockLocale, unlock: unlockLocale } = useLocale();
+  useEffect(() => {
+    if (enabled) lockLocale();
+  }, [enabled, lockLocale]);
   /* ---- State ---- */
   const [players, setPlayers] = useState<PlayerDataDTO[]>([]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -113,12 +145,13 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     message?: string;
   } | null>(null);
   const [worldMeta, setWorldMeta] = useState<{
-    title: string;
-    setting: string;
-    openingNarration: string;
+    /** #58: bilingual — render via pickLang(field, locale). */
+    title: Bilingual;
+    setting: Bilingual;
+    openingNarration: Bilingual;
     openingImageUrl: string | null;
     rooms: Array<{ id: string; name: string; exits: Record<string, string | null> }>;
-    npcs: Array<{ id: string; name: string; role: string }>;
+    npcs: Array<{ id: string; name: string; role: Bilingual }>;
     evidenceItems: Array<{ id: string; name: string }>;
   } | null>(null);
   const [roomImages, setRoomImages] = useState<Record<string, string>>({});
@@ -179,30 +212,33 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setIsConnected(false);
     });
 
-    /* -- Player events -- */
+    /* -- Player events (#58: locale-aware system lines) -- */
     socket.on('player:joined', ({ player, allPlayers }) => {
       setPlayers(allPlayers);
+      const T = getT(locale);
       addMessage({
         role: 'system',
-        content: `**${player.name}** joined the session.`,
+        content: `**${player.name}**${T.game.systemJoined}`,
         timestamp: Date.now(),
       });
     });
 
     socket.on('player:left', ({ playerName, allPlayers }) => {
       setPlayers(allPlayers);
+      const T = getT(locale);
       addMessage({
         role: 'system',
-        content: `**${playerName}** disconnected.`,
+        content: `**${playerName}**${T.game.systemDisconnected}`,
         timestamp: Date.now(),
       });
     });
 
     socket.on('player:reconnected', ({ playerName, allPlayers }) => {
       setPlayers(allPlayers);
+      const T = getT(locale);
       addMessage({
         role: 'system',
-        content: `**${playerName}** reconnected.`,
+        content: `**${playerName}**${T.game.systemReconnected}`,
         timestamp: Date.now(),
       });
     });
@@ -289,6 +325,18 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     socket.on('session:state', ({ session }) => {
       setPlayers(session.players);
       setGameState(session.state);
+      // #58: re-sync our locale with the server-authoritative value. Cross-tab
+      // localStorage overwrites are common when both TR and EN players share
+      // the same browser; server's player.locale wins.
+      const myId = myPlayerIdRef.current;
+      if (myId) {
+        const me = session.players.find((p) => p.id === myId);
+        if (me?.locale && me.locale !== locale) {
+          unlockLocale();
+          setLocale(me.locale);
+          lockLocale();
+        }
+      }
       if (session.selectedScenarioId !== undefined) setSelectedScenarioId(session.selectedScenarioId ?? null);
       if (session.scenarioVotes) setScenarioVotes(session.scenarioVotes);
       if (session.commHistory) setCommMessages(session.commHistory);
@@ -335,13 +383,15 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     socket.on('game:started', ({ players: startedPlayers, openingNarration }) => {
       setGameState('playing');
       setPlayers(startedPlayers);
-      // C.1: Render the shared opening narration immediately so it survives
-      // the cinematic dismissing without requiring a page refresh.
-      if (openingNarration && openingNarration.trim().length > 0) {
+      lockLocale(); // #58: language is fixed for the rest of the session
+
+      // C.1 + #58: render shared opening narration in this player's locale.
+      const openingText = openingNarration ? pickLang(openingNarration, locale) : '';
+      if (openingText && openingText.trim().length > 0) {
         addMessage({
           role: 'assistant',
-          content: openingNarration,
-          playerName: 'Anlatıcı',
+          content: openingText,
+          playerName: locale === 'en' ? 'Narrator' : 'Anlatıcı',
           timestamp: Date.now(),
           messageType: 'global',
         });
@@ -365,25 +415,32 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setPlayers(updatedPlayers);
     });
 
-    /* -- Accusation voting events (#25) -- */
+    /* -- Accusation voting events (#25) — #58: locale-aware client-side */
     socket.on('accusation:vote-started', ({ proposerId, proposerName, suspectId, suspectName, expiresAt }) => {
       setActiveVote({ proposerId, proposerName, suspectId, suspectName, expiresAt });
+      const T = getT(locale);
       addMessage({
         role: 'system',
-        content: `**${proposerName}** proposed accusing **${suspectName}**. All players must vote.`,
+        content: `${T.accuse.proposedPrefix}**${proposerName}**${T.accuse.proposedMiddle}**${suspectName}**${T.accuse.proposedSuffix}`,
         timestamp: Date.now(),
       });
     });
 
-    socket.on('accusation:vote-result', ({ result, isCorrect, summary }) => {
+    socket.on('accusation:vote-result', ({ result, isCorrect }) => {
       setActiveVote(null);
-      const label = result === 'guilty' ? 'GUILTY' : 'NOT GUILTY';
-      const verdict = summary ?? `Vote result: ${label}.`;
+      const T = getT(locale);
+      // isCorrect undefined → the vote did not pass unanimously
+      let body: string;
+      if (isCorrect === undefined) {
+        body = T.accuse.voteResultUndecided;
+      } else {
+        const verdict = result === 'guilty' ? T.accuse.voteResultGuilty : T.accuse.voteResultNotGuilty;
+        const tail = isCorrect ? T.accuse.voteSuffixCorrect : T.accuse.voteSuffixWrong;
+        body = `${verdict}${tail}`;
+      }
       addMessage({
         role: 'system',
-        content: isCorrect === undefined
-          ? verdict
-          : `${verdict} ${isCorrect ? '— The team was right.' : '— The team was wrong.'}`,
+        content: body,
         timestamp: Date.now(),
       });
     });
@@ -447,7 +504,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       if (!socket?.connected) { setError('Not connected to server'); return false; }
 
       return new Promise((resolve) => {
-        socket.emit('player:join', { sessionId, playerName }, (resp) => {
+        socket.emit('player:join', { sessionId, playerName, locale: getCurrentLocale() }, (resp) => {
           if (resp.success && resp.playerId) {
             setMyPlayerId(resp.playerId);
             saveIdentity({ sessionId, playerId: resp.playerId, playerName });

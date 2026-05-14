@@ -12,6 +12,7 @@
 
 import React from 'react';
 import Markdown from 'react-markdown';
+import { useT } from '@/hooks/useLocale';
 
 interface ChatMessageProps {
   role: 'user' | 'assistant' | 'system' | 'observed';
@@ -33,6 +34,7 @@ export function ChatMessage({
   isLoadingImage,
   messageType,
 }: ChatMessageProps) {
+  const T = useT();
   /* ---- C.1: Shared opening narration — distinct style ---- */
   if (messageType === 'global' && role === 'assistant') {
     return (
@@ -47,7 +49,7 @@ export function ChatMessage({
           marginBottom: '8px',
           opacity: 0.7,
         }}>
-          ── Açılış ──
+          {T.game.openingDivider}
         </div>
         <div style={{
           padding: '20px 24px',
@@ -173,7 +175,7 @@ export function ChatMessage({
           gap: '6px',
         }}>
           {isNarrator ? (
-            'Narrator'
+            T.game.narratorLabel
           ) : (
             <>
               <span style={{
@@ -183,7 +185,7 @@ export function ChatMessage({
                 backgroundColor: displayColor,
                 display: 'inline-block',
               }} />
-              {playerName || 'Player'}
+              {playerName || T.game.playerLabel}
             </>
           )}
         </div>

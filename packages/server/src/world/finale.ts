@@ -12,7 +12,8 @@
  */
 
 import OpenAI from 'openai';
-import type { WorldData } from '@akboys/shared';
+import { pickLang } from '@akboys/shared';
+import type { Locale, WorldData } from '@akboys/shared';
 
 let _client: OpenAI | null = null;
 function client(): OpenAI {
@@ -33,6 +34,8 @@ export interface GenerateFinaleInput {
   worldStateLog: string[];
   turnCount: number;
   maxTurns: number;
+  /** #58: player's locale for the streamed finale text. */
+  locale: Locale;
 }
 
 function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: string } {
@@ -46,7 +49,11 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
     worldStateLog,
     turnCount,
     maxTurns,
+    locale,
   } = input;
+
+  const isEn = locale === 'en';
+  const langName = isEn ? 'English' : 'Turkish';
 
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
@@ -54,11 +61,11 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
   const wrongNpc = wrongAccusedNpcId ? world.npcs.find((n) => n.id === wrongAccusedNpcId) : null;
   const evidenceItem = evidencePresentedId ? world.items.find((i) => i.id === evidencePresentedId) : null;
 
-  const system = `You are narrating the FINALE of a mystery. Write in clear, direct, natural Turkish.
+  const system = `You are narrating the FINALE of a mystery. Write in clear, direct, natural ${langName}.
 
-Write EXACTLY 2 short paragraphs. Maximum 150 Turkish words total. Every sentence delivers a fact or beat — no filler, no decoration, no "edebi" heavy style.
+Write EXACTLY 2 short paragraphs. Maximum 150 ${langName} words total. Every sentence delivers a fact or beat — no filler, no decoration, no heavy literary style.
 
-Plain readable prose. Short sentences. Think the matter-of-fact voice of a detective recounting what happened, NOT Orhan Pamuk. Every line should either:
+Plain readable prose. Short sentences. Think the matter-of-fact voice of a detective recounting what happened. Every line should either:
   - Name a specific thing the team found or missed
   - State who did what and why
   - Land a concrete consequence
@@ -68,11 +75,11 @@ Read it aloud in your head — if a sentence sounds ornamental, cut it.
 Do NOT use list items, headers, or markdown. Prose only. Separate the two paragraphs with a single blank line.`;
 
   const truthBlock = `WORLD:
-Title: ${world.meta.title}
-Setting: ${world.meta.setting}
+Title: ${pickLang(world.meta.title, locale)}
+Setting: ${pickLang(world.meta.setting, locale)}
 
-TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (role: ${culprit?.role ?? 'unknown'})
-TRUE MOTIVE: ${world.solution.motiveShort}
+TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (role: ${culprit ? pickLang(culprit.role, locale) : 'unknown'})
+TRUE MOTIVE: ${pickLang(world.solution.motiveShort, locale)}
 KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}`;
 
   const logBlock = worldStateLog.length
@@ -104,7 +111,7 @@ True culprit (never caught): ${culprit?.name}
 Write a defeated, reflective ending. Describe how the case slipped away. The city moved on. The culprit was never caught. Short, elegiac paragraphs.`;
   }
 
-  const user = `${truthBlock}\n\n${logBlock}\n\n${outcomeBlock}\n\nWrite the finale now, in Turkish prose only.`;
+  const user = `${truthBlock}\n\n${logBlock}\n\n${outcomeBlock}\n\nWrite the finale now, in ${langName} prose only.`;
 
   return { system, user };
 }
@@ -114,7 +121,7 @@ Write a defeated, reflective ending. Describe how the case slipped away. The cit
  */
 export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<string> {
   const { system, user } = buildFinalePrompt(input);
-  console.log(`${DEBUG} streaming finale: outcome=${input.outcome}`);
+  console.log(`${DEBUG} streaming finale: outcome=${input.outcome} locale=${input.locale}`);
 
   const t0 = Date.now();
   const stream = await client().chat.completions.create({

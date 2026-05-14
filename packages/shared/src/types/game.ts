@@ -9,6 +9,21 @@
  */
 
 /* ------------------------------------------------------------------ */
+/*  Locale (#58 — bilingual support)                                   */
+/* ------------------------------------------------------------------ */
+
+/** Player's chosen UI/narration language. Locked at game start. */
+export type Locale = 'tr' | 'en';
+
+/**
+ * A field produced by the LLM in BOTH languages so any player can read
+ * it in their own locale without re-translating. Strings are also
+ * accepted for backward compatibility with pre-i18n session data — they
+ * render the same in any locale.
+ */
+export type Bilingual<T = string> = T | { tr: T; en: T };
+
+/* ------------------------------------------------------------------ */
 /*  Player roles (#18)                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -145,6 +160,11 @@ export interface GameState {
 /** A single chat message between player and narrator */
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
+  /**
+   * Single-language body. For narrator-generated messages this is the
+   * Turkish slice; the bilingual companion (`MultiplayerChatMessage
+   * .bilingualContent`) carries both languages when present.
+   */
   content: string;
   timestamp: number;
 }
@@ -197,6 +217,12 @@ export interface PlayerData {
   visitedRooms: string[];
   isConnected: boolean;
   color: PlayerColor;
+  /**
+   * UI + narration language for this player (#58). Picked at join time
+   * and locked when the game transitions out of lobby. Defaults to 'tr'
+   * for pre-i18n sessions during deserialisation.
+   */
+  locale: Locale;
   joinedAt: number;
   lastActiveAt: number;
 }
@@ -219,6 +245,13 @@ export interface MultiplayerChatMessage extends ChatMessage {
   visibleTo?: string[];
   /** Sub-role for scoped rendering (observed, private, global) */
   messageType?: 'private' | 'observed' | 'global' | 'action';
+  /**
+   * #58 — bilingual companion payload. When present, wire emits that
+   * target a specific player should use pickLang(bilingualContent,
+   * player.locale) instead of the single-language `content`. Internal
+   * narrator pipeline produces both fields in lockstep.
+   */
+  bilingualContent?: Bilingual;
 }
 
 /* ------------------------------------------------------------------ */
@@ -277,26 +310,27 @@ export interface ReconstructionEvent {
   time: string;
   /** Room ID — must match an existing world.rooms[].id. */
   roomId: string;
-  /** Display name for the room (server-enriched). */
+  /** Display name for the room (server-enriched, single proper noun). */
   roomName: string;
   /** NPC ID — must match world.npcs[].id, or '' for "no actor". */
   actorNpcId: string;
-  /** Display name for the actor (server-enriched, e.g. "Doktor Şevket"). */
+  /** Display name for the actor (server-enriched, single proper noun). */
   actorName: string;
-  /** Actor's role from world.npcs (e.g. "doktor"). Empty when no actor. */
-  actorRole: string;
-  /** 1-2 Turkish sentences describing this beat. */
-  description: string;
+  /** Actor's role from world.npcs (bilingual after #58). */
+  actorRole: Bilingual;
+  /** 1-2 sentence beat description (bilingual after #58). */
+  description: Bilingual;
   /** True if this is the culprit doing something pivotal — UI highlights. */
   isCulpritAction: boolean;
 }
 
 /** Full reconstruction payload sent from the server to the client. */
 export interface ReconstructionDTO {
-  title: string;
+  /** Case title (bilingual after #58). */
+  title: Bilingual;
   events: ReconstructionEvent[];
-  /** 2-3 Turkish sentences summarising what really happened. */
-  conclusion: string;
+  /** 2-3 sentence summary of what really happened (bilingual after #58). */
+  conclusion: Bilingual;
   /** Generation timestamp; allows the client to detect regenerations. */
   generatedAt: number;
 }

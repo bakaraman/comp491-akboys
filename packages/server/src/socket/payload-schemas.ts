@@ -24,9 +24,14 @@ const playerId  = z.string().min(1, 'playerId required');
 /*  ClientToServerEvents schemas                                        */
 /* ------------------------------------------------------------------ */
 
+/** Locale primitive — used by player:join (#58) */
+const localeSchema = z.enum(['tr', 'en']);
+
 export const PlayerJoinSchema = z.object({
   sessionId,
   playerName: z.string().min(1).max(32),
+  /** Optional for backward compat with older clients — defaults to 'tr' server-side. */
+  locale: localeSchema.optional(),
 });
 
 export const PlayerActionSchema = z.object({

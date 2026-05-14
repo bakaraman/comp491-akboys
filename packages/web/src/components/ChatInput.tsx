@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useT } from '@/hooks/useLocale';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -21,6 +22,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, onTypingChange, playerName, disabled }: ChatInputProps) {
+  const T = useT();
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const typingRef = useRef(false);
@@ -59,10 +61,10 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
   }
 
   const placeholder = disabled
-    ? 'The narrator is thinking...'
+    ? T.game.narratorWriting
     : playerName
-      ? `What do you do, ${playerName}?`
-      : 'What do you do?';
+      ? T.game.sendPlaceholderNamed.replace('{name}', playerName)
+      : T.game.sendPlaceholder;
 
   const isDisabled = disabled || !text.trim();
 
@@ -111,7 +113,7 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
           transition: 'background-color 0.2s',
         }}
       >
-        Send
+        {T.game.send}
       </button>
     </form>
   );

@@ -625,7 +625,14 @@ function deserializeSession(data: StoredSessionData): SessionData {
     createdAt: data.createdAt,
     lastActivityAt: data.lastActivityAt,
     gameState: data.gameState,
-    players: new Map((data.players || []).map((player) => [player.id, player])),
+    // Old sessions may not carry player.locale; default to 'tr' so the
+    // strict PlayerData shape is satisfied at runtime too (#58).
+    players: new Map(
+      (data.players || []).map((player) => [
+        player.id,
+        { ...player, locale: player.locale ?? 'tr' },
+      ]),
+    ),
     actionQueue: data.actionQueue || [],
     maxPlayers: data.maxPlayers,
     state: data.state,

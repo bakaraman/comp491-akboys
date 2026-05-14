@@ -25,7 +25,7 @@ import type {
   NPCState,
   Scenario,
 } from '@akboys/shared';
-import { toPlayerDTO, SCENARIOS } from '@akboys/shared';
+import { toPlayerDTO, SCENARIOS, pickLang } from '@akboys/shared';
 import type { SessionStore, SessionData } from '../store/SessionStore.js';
 import { nextPlayerColor, serializeVotes } from '../store/SessionStore.js';
 import { ActionBatcher, PLAYER_ACTION_COOLDOWN } from './action-batcher.js';
@@ -102,10 +102,16 @@ function getAllPlayerDTOs(store: SessionStore, sessionId: string) {
   return Array.from(session.players.values()).map(toPlayerDTO);
 }
 
-/** Filter session history server-side — only messages this player should see */
+/** Filter session history server-side — only messages this player should see.
+ *  #58: when a message carries a bilingual companion (`bilingualContent`),
+ *  flatten to the receiving player's locale so the chat re-renders in their
+ *  language after a reconnect, instead of falling back to the TR slice. */
 function filterHistoryForPlayer(store: SessionStore, sessionId: string, playerId: string) {
   const session = store.get(sessionId);
   if (!session) return [];
+
+  const player = session.players.get(playerId);
+  const locale = player?.locale ?? 'tr';
 
   return session.history
     .filter((m) => {
@@ -116,7 +122,7 @@ function filterHistoryForPlayer(store: SessionStore, sessionId: string, playerId
     })
     .map((m) => ({
       role: m.role,
-      content: m.content,
+      content: m.bilingualContent ? pickLang(m.bilingualContent, locale) : m.content,
       playerId: m.playerId,
       playerName: m.playerName,
       playerColor: m.playerColor,
@@ -365,17 +371,36 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       });
 
       const actorSockets = findSocketsForPlayer(action.playerId);
-      // Same-room witness sockets receive narrator chunks in real time too.
-      const roomWitnessSockets = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
-      const streamFanoutSockets = new Set<string>([...actorSockets, ...roomWitnessSockets]);
+      // #58: narrator chunks are actor-only — see emit blocks below. Same-room
+      // witnesses still see the actor's typed action message (stored with a
+      // same-room visibleTo earlier in this loop).
 
       // Primary: structured JSON response (no streaming, but guaranteed schema)
       // Fallback: streaming text response with legacy parsing
-      let privateResponse: string;
-      let observedLine: string;
+      let privateResponse: { tr: string; en: string };
+      let observedLine: { tr: string; en: string };
       let directives: ReturnType<typeof parseStructuredResponse>['directives'];
 
-      const structuredResult = await narratorStructuredResponse(systemPrompt, session.history);
+      // #58: helper to flatten a bilingual block for one specific player's socket
+      const flattenFor = (
+        targetPlayerId: string,
+        bilingual: { tr: string; en: string },
+      ): string => {
+        const targetPlayer = session.players.get(targetPlayerId);
+        const targetLocale = targetPlayer?.locale ?? 'tr';
+        return pickLang(bilingual, targetLocale);
+      };
+
+      // #58: structured-call retry once on null. Catches both transient
+      // API errors and LLM outputs that fail our JSON-contamination check.
+      let structuredResult = await narratorStructuredResponse(systemPrompt, session.history);
+      if (!structuredResult) {
+        console.warn(`[narrator-structured] first attempt returned null for ${action.playerName}, retrying...`);
+        structuredResult = await narratorStructuredResponse(systemPrompt, session.history);
+        if (!structuredResult) {
+          console.error(`[narrator-structured] both attempts failed for ${action.playerName}, falling back to legacy text`);
+        }
+      }
 
       if (structuredResult) {
         // Structured path succeeded — parse with schema validation
@@ -384,25 +409,38 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         observedLine = parsed.observedLine;
         directives = parsed.directives;
 
-        // Emit the completed response to actor + same-room witnesses
-        for (const sid of streamFanoutSockets) {
+        // #58: narrator response is ACTOR-ONLY. In bilingual MP, witnesses
+        // were receiving the actor's narrator translated into their own
+        // locale, which read as a second-person ("sen / you") message and
+        // looked like the witness's own action — extremely confusing. The
+        // witness still sees the actor's typed action message (stored above
+        // with same-room visibleTo) so co-op context is not lost; only the
+        // narrator's prose is private to the actor.
+        const flat = flattenFor(action.playerId, privateResponse);
+        const actorSocketIds = findSocketsForPlayer(action.playerId);
+        for (const sid of actorSocketIds) {
           io.to(sid).emit('narrator:chunk', {
-            content: privateResponse,
-            fullText: privateResponse,
+            content: flat,
+            fullText: flat,
             targetPlayerId: action.playerId,
           });
         }
 
         console.log(`[batcher] structured response for ${action.playerName}`);
       } else {
-        // Fallback: streaming text response with legacy tag parsing
+        // Fallback: streaming text response with legacy tag parsing.
+        // Legacy path is single-language (Turkish). Stream as-is to the
+        // existing fan-out; locale fidelity is lost for the fallback, which
+        // is acceptable because it only fires when the structured path errors.
         console.log(`[batcher] falling back to streaming for ${action.playerName}`);
         let fullText = '';
 
         try {
           for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
             fullText += chunk;
-            for (const sid of streamFanoutSockets) {
+            // #58: legacy fallback is also actor-only — same reasoning as the
+            // structured path (witnesses don't see second-person prose).
+            for (const sid of actorSockets) {
               io.to(sid).emit('narrator:chunk', {
                 content: chunk,
                 fullText,
@@ -457,33 +495,28 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       // Also append a narrator-response preview line to the world log so the
       // finale prompt has real story context (since we don't track pickups).
+      // #58: log the TR slice — finale prompt reads world log as TR context.
       {
-        const preview = privateResponse.replace(/\n+/g, ' ').slice(0, 200);
+        const preview = privateResponse.tr.replace(/\n+/g, ' ').slice(0, 200);
         session.worldStateLog.push(
           `Turn ${session.gameState.turnCount}: ${action.playerName} in ${action.roomId} — "${action.message.slice(0, 80)}" → ${preview}`,
         );
       }
 
-      // Velvet Shadow v2: same-room players share the FULL narrator response
-      // (observed summaries removed — every player in this room sees what the
-      // actor did and what the narrator said, as if they were there together).
-      const witnessIds: string[] = [];
-      for (const p of session.players.values()) {
-        if (p.currentRoomId === action.roomId && p.isConnected && p.id !== action.playerId) {
-          witnessIds.push(p.id);
-        }
-      }
-      const audienceIds = [action.playerId, ...witnessIds];
-
-      // Store the full response once, visible to actor + same-room witnesses
+      // #58: narrator response is ACTOR-ONLY (see emit block above for why).
+      // The actor's typed action message is already visible to same-room
+      // witnesses (stored earlier with a same-room visibleTo); witnesses
+      // read what was done but not the second-person prose addressed to
+      // the actor.
       store.addMessage(sessionId, {
         role: 'assistant',
-        content: privateResponse,
+        content: privateResponse.tr,
+        bilingualContent: privateResponse,
         playerId: action.playerId,
         playerName: action.playerName,
         timestamp: Date.now(),
         messageType: 'private',
-        visibleTo: audienceIds,
+        visibleTo: [action.playerId],
       });
 
       // Generate scoped suggestions for the actor (witnesses don't get suggestions —
@@ -493,23 +526,26 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const updatedActor = store.getPlayer(sessionId, action.playerId);
       const actorRoomId = updatedActor?.currentRoomId ?? action.roomId;
       const sceneCtx = buildSceneContext(scenario, session, actorRoomId);
-      let suggestions: string[];
+      const actorLocale = updatedActor?.locale ?? 'tr';
+      let suggestionsBilingual: Array<{ tr: string; en: string }>;
       try {
-        suggestions = await suggestFollowUps(privateResponse, sceneCtx);
+        suggestionsBilingual = await suggestFollowUps(privateResponse.tr, sceneCtx);
       } catch {
         // Use the scene-aware fallback rather than scattered hardcoded tuples.
-        suggestions = buildContextFallbacks(sceneCtx);
+        suggestionsBilingual = buildContextFallbacks(sceneCtx);
       }
+      const actorSuggestions = suggestionsBilingual.map((s) => pickLang(s, actorLocale));
 
-      // Send narrator:done to the actor AND to same-room witnesses.
-      // Witnesses see the full text but with the actor's name attached so the UI
-      // can visually mark "this was X's action" in the shared stream.
-      const witnessSocketIds = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
-      const fanoutSocketIds = new Set<string>([...actorSockets, ...witnessSocketIds]);
-      for (const sid of fanoutSocketIds) {
+      // #58: narrator:done is ACTOR-ONLY (matches the actor-only narrator:chunk
+      // path above). Witnesses do not receive the second-person narrator prose
+      // because in bilingual MP it translates as if it were addressed to them,
+      // which is confusing. They still see the actor's typed action message.
+      const actorDoneSockets = findSocketsForPlayer(action.playerId);
+      const actorFlat = flattenFor(action.playerId, privateResponse);
+      for (const sid of actorDoneSockets) {
         io.to(sid).emit('narrator:done', {
-          fullText: privateResponse,
-          suggestions: actorSockets.includes(sid) ? suggestions : [],
+          fullText: actorFlat,
+          suggestions: actorSuggestions,
           targetPlayerId: action.playerId,
         });
       }
@@ -524,7 +560,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const updatedPlayersAfterAction = Array.from(session.players.values()).map(toPlayerDTO);
       io.to(sessionId).emit('players:updated', { players: updatedPlayersAfterAction });
 
-      console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
+      console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives)`);
     }
 
     // ---- #25: Increment MP turn counter after each batch ----
@@ -617,7 +653,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
     socket.on('player:join', (data, callback) => {
       const v = validatePayload(PlayerJoinSchema, data, 'player:join');
       if (!v.ok) { callback({ success: false, error: 'Invalid payload' }); return; }
-      const { sessionId, playerName } = v.data;
+      const { sessionId, playerName, locale } = v.data;
 
       const session = store.get(sessionId);
       if (!session) {
@@ -659,11 +695,18 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         visitedRooms: [startRoom],
         isConnected: true,
         color: nextPlayerColor(session),
+        locale: locale ?? 'tr', // #58: optional from older clients → TR default
         joinedAt: Date.now(),
         lastActiveAt: 0,
       };
 
       store.addPlayer(sessionId, player);
+      // #58: drop any stale socket mappings for the same playerId so a
+      // refresh during the disconnect grace window doesn't double-emit
+      // narrator chunks to two sockets simultaneously.
+      for (const [sid, mapping] of socketMap) {
+        if (mapping.playerId === playerId && sid !== socket.id) socketMap.delete(sid);
+      }
       socketMap.set(socket.id, { sessionId, playerId });
       socket.join(sessionId);
 
@@ -1061,8 +1104,8 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         const result = await generateWorld({ hostPrompt, playerCount });
         const worldMs = Date.now() - tWorldStart;
         store.setWorld(sessionId, result.world);
-        console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${result.world.meta.title}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback} genre=${result.genreTag}`);
-        console.log(`[story ${sid}]   openingNarration: ${result.world.openingNarration.slice(0, 240)}...`);
+        console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${pickLang(result.world.meta.title, 'tr')}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback} genre=${result.genreTag}`);
+        console.log(`[story ${sid}]   openingNarration: ${pickLang(result.world.openingNarration, 'tr').slice(0, 240)}...`);
         console.log(`[story ${sid}]   culprit: ${result.world.npcs.find((n) => n.isCulprit)?.name}`);
 
         // Also set scenarioId to our synthetic marker so downstream code knows.
@@ -1173,13 +1216,15 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       callback({ success: true });
 
       const allPlayers = getAllPlayerDTOs(store, sessionId);
+      const sessionWorld = session.world;
       io.to(sessionId).emit('game:started', {
         sessionId,
-        scenarioTitle: scenario.title,
+        // #58: scenarioTitle is bilingual when sourced from world.meta, fallback
+        // to plain string for pre-i18n scenarios.
+        scenarioTitle: sessionWorld?.meta.title ?? scenario.title,
         players: allPlayers,
-        // C.1: Send opening narration in the same payload so clients can
-        // prepend it to chat without needing a session:state refetch.
-        openingNarration: session.world?.openingNarration,
+        // #58: bilingual opening narration; clients pickLang in their locale.
+        openingNarration: sessionWorld?.openingNarration,
       });
 
       // C.4: Initial turn counter broadcast (turn 0 of N)
@@ -1193,10 +1238,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // it as a global message — every player (including reconnects and late
       // joiners) sees it as the first narrator entry in chat.
       const world = session.world;
-      if (world.openingNarration && world.openingNarration.trim().length > 0) {
+      const openingNarrationTr = pickLang(world.openingNarration, 'tr');
+      if (openingNarrationTr && openingNarrationTr.trim().length > 0) {
         store.addMessage(sessionId, {
           role: 'assistant',
-          content: world.openingNarration,
+          content: openingNarrationTr,
+          bilingualContent: world.openingNarration,
           playerName: 'Anlatıcı',
           timestamp: Date.now(),
           messageType: 'global',
@@ -1205,17 +1252,25 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       // Emit per-player entry scene narration as the opening.
       // Each player gets ONE narrator chunk that is scoped to them (their entry hook).
+      // #58: server-side flatten by player.locale so the narrator wire stays string.
       const entries = world.entryScenes;
       const playerList = Array.from(session.players.values());
       for (let i = 0; i < playerList.length; i++) {
         const p = playerList[i];
         const entry = entries[i % entries.length];
-        const hook = entry.narrativeHook;
+        const hookBilingual = entry.narrativeHook;
+        const hook = pickLang(hookBilingual, p.locale);
+        const suggestions = p.locale === 'en'
+          ? ['Look around', 'Examine the room', 'Move on']
+          : ['Etrafına bak', 'Odayı incele', 'İleri git'];
 
-        // Store as a private message visible only to this player
+        // Store as a private message visible only to this player.
+        // Persist the TR slice as primary content (legacy) and the bilingual
+        // companion so future reconnects/replays can re-render in any locale.
         store.addMessage(sessionId, {
           role: 'assistant',
-          content: hook,
+          content: pickLang(hookBilingual, 'tr'),
+          bilingualContent: hookBilingual,
           playerId: p.id,
           playerName: p.name,
           timestamp: Date.now(),
@@ -1233,7 +1288,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
           });
           io.to(sid).emit('narrator:done', {
             fullText: hook,
-            suggestions: ['Etrafına bak', 'Odayı incele', 'İleri git'],
+            suggestions,
             targetPlayerId: p.id,
           });
         }
@@ -1353,6 +1408,11 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       }
 
       store.updatePlayer(sessionId, playerId, { isConnected: true, lastActiveAt: Date.now() });
+      // #58: drop any stale socket mappings for the same playerId so a
+      // refresh during the disconnect grace window doesn't double-emit.
+      for (const [sid, mapping] of socketMap) {
+        if (mapping.playerId === playerId && sid !== socket.id) socketMap.delete(sid);
+      }
       socketMap.set(socket.id, { sessionId, playerId });
       socket.join(sessionId);
 

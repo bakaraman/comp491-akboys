@@ -21,7 +21,8 @@ import { CommPanel } from '@/components/CommPanel';
 import { LobbyScreen } from '@/components/LobbyScreen';
 import { OpeningCinematic } from '@/components/OpeningCinematic';
 import { FinaleCinematic } from '@/components/FinaleCinematic';
-import { T } from '@/lib/tr';
+import { useLocale, useT } from '@/hooks/useLocale';
+import { pickLang } from '@/lib/i18n';
 import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
@@ -67,6 +68,8 @@ interface SessionInfo {
 /* ------------------------------------------------------------------ */
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { id: sessionId } = use(params);
   const searchParams = useSearchParams();
   const isSpectator = searchParams.get('role') === 'spectator';
@@ -193,19 +196,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [openingTtsUrl, setOpeningTtsUrl] = useState<string | null>(null);
   const ttsPrefetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    const narration = mp.worldMeta?.openingNarration;
+    const narrationField = mp.worldMeta?.openingNarration;
+    if (!narrationField) return;
+    const narration = pickLang(narrationField, locale);
     if (!narration || narration.length < 20) return;
     if (ttsPrefetchedFor.current === narration) return;
     ttsPrefetchedFor.current = narration;
 
     const t0 = Date.now();
-    console.log('[session] TTS pre-fetch start (voice=ash, chars=' + narration.length + ')');
+    const voice = locale === 'en' ? 'onyx' : 'ash';
+    console.log(`[session] TTS pre-fetch start (locale=${locale}, voice=${voice}, chars=${narration.length})`);
     (async () => {
       try {
         const res = await fetch(`${API_BASE}/api/chat/tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-          body: JSON.stringify({ text: narration, voice: 'ash' }),
+          body: JSON.stringify({ text: narration, voice, locale }),
         });
         if (!res.ok) {
           console.error('[session] TTS pre-fetch HTTP ' + res.status);
@@ -404,7 +410,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /*  RENDER: Multiplayer Game                                         */
   /* ================================================================ */
   const typingNames = Array.from(mp.typingPlayers.values());
-  const gameScenarioTitle = mp.worldMeta?.title || sessionInfo.scenarioTitle;
+  const titleField = mp.worldMeta?.title;
+  const gameScenarioTitle = titleField ? pickLang(titleField, locale) : sessionInfo.scenarioTitle;
   const gameEmoji = '\uD83D\uDD75\uFE0F';
 
   return (
@@ -432,7 +439,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             return (
               <span
                 data-tutorial="turn-counter"
-                title={`${remaining} tur kaldı`}
+                title={`${remaining} ${T.game.turnsRemaining}`}
                 style={{
                   fontSize: '11px',
                   fontFamily: 'monospace',
@@ -506,7 +513,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a3540', borderRadius: '6px', color: '#7a9ab8', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7a9ab8'; e.currentTarget.style.color = '#9ab8d0'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a3540'; e.currentTarget.style.color = '#7a9ab8'; }}
-          >Map</button>
+          >{T.game.mapToggle}</button>
           {/* Hide Accuse for spectators (#52); keep tutorial highlight (#49) */}
           {!isSpectator && (
             <button
@@ -520,7 +527,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <button onClick={handleLeave} style={{ padding: '6px 12px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '6px', color: '#6a6050', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#cf5b5b'; e.currentTarget.style.color = '#cf5b5b'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#6a6050'; }}
-          >Leave</button>
+          >{T.game.leave}</button>
         </div>
       </div>
 
@@ -657,7 +664,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             myName={myPlayer?.name}
             myColor={myPlayer?.color}
             onTravel={(roomName) => {
-              mp.sendAction(`${roomName} odasına gidiyorum.`);
+              mp.sendAction(`${T.game.moveActionPrefix}${roomName}${T.game.moveActionSuffix}`);
             }}
             disabled={mp.isNarratorStreaming}
           />
@@ -691,8 +698,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       {/* Opening Cinematic — shown once per playing session */}
       {mp.gameState === 'playing' && mp.worldMeta && !openingDismissed && !mp.gameOver && (
         <OpeningCinematic
-          title={mp.worldMeta.title}
-          openingNarration={mp.worldMeta.openingNarration}
+          title={pickLang(mp.worldMeta.title, locale)}
+          openingNarration={pickLang(mp.worldMeta.openingNarration, locale)}
           openingImageUrl={mp.worldMeta.openingImageUrl}
           ttsAudioUrl={openingTtsUrl}
           onStart={() => setOpeningDismissed(true)}
@@ -738,6 +745,7 @@ function AccusationVoteBanner({
   isProposer: boolean;
   onVote: (v: 'guilty' | 'not_guilty') => Promise<boolean>;
 }) {
+  const T = useT();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 500);
@@ -759,19 +767,22 @@ function AccusationVoteBanner({
         fontFamily: 'monospace', fontSize: '10px', color: '#6a6050',
         letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px',
       }}>
-        Accusation Vote · {secondsLeft}s
+        {T.accuse.bannerLabel} · {secondsLeft}{T.accuse.bannerSecondsSuffix}
       </div>
       <div style={{
         fontFamily: 'Georgia, serif', fontSize: '16px', color: '#e8e0d4',
         marginBottom: '14px', lineHeight: '1.5',
       }}>
-        <strong style={{ color: '#d4a843' }}>{vote.proposerName}</strong> accuses{' '}
-        <strong style={{ color: '#d46868' }}>{vote.suspectName}</strong>.
-        {isProposer ? ' Waiting for your teammates to vote.' : ' Cast your vote.'}
+        <strong style={{ color: '#d4a843' }}>{vote.proposerName}</strong>{T.accuse.bannerAccusesMiddle}
+        <strong style={{ color: '#d46868' }}>{vote.suspectName}</strong>{T.accuse.bannerAccusesEnd}
+        {isProposer ? T.accuse.bannerWaitingForTeam : T.accuse.bannerCastVote}
       </div>
       {hasVoted ? (
         <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#8a8070', textAlign: 'center' }}>
-          You voted: <strong style={{ color: vote.myVote === 'guilty' ? '#d46868' : '#5ba3cf' }}>{vote.myVote === 'guilty' ? 'GUILTY' : 'NOT GUILTY'}</strong> — waiting for others.
+          {T.accuse.bannerYouVoted}{' '}
+          <strong style={{ color: vote.myVote === 'guilty' ? '#d46868' : '#5ba3cf' }}>
+            {vote.myVote === 'guilty' ? T.accuse.bannerGuilty : T.accuse.bannerNotGuilty}
+          </strong>{T.accuse.bannerWaitingForOthers}
         </div>
       ) : (
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -787,7 +798,7 @@ function AccusationVoteBanner({
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#d46868'; e.currentTarget.style.color = '#0a0a0a'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#2a1515'; e.currentTarget.style.color = '#d46868'; }}
           >
-            Guilty
+            {T.accuse.voteYes.split(',')[0] || T.accuse.bannerGuilty}
           </button>
           <button
             onClick={() => void onVote('not_guilty')}
@@ -801,7 +812,7 @@ function AccusationVoteBanner({
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#5ba3cf'; e.currentTarget.style.color = '#0a0a0a'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#102030'; e.currentTarget.style.color = '#5ba3cf'; }}
           >
-            Not Guilty
+            {T.accuse.bannerNotGuilty}
           </button>
         </div>
       )}
@@ -829,6 +840,7 @@ function AccuseModal({
   onCancel: () => void;
   onAccuse: (suspectId: string) => void;
 }) {
+  const T = useT();
   const [selected, setSelected] = useState<string>('');
 
   return (
@@ -850,7 +862,7 @@ function AccuseModal({
 
         {suspects.length === 0 ? (
           <p style={{ color: '#6a6050', fontSize: '13px', fontStyle: 'italic', fontFamily: 'Georgia, serif', marginBottom: '20px' }}>
-            Henüz kimseyle karşılaşmadın.
+            {T.accuse.noSuspectsYet}
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
@@ -937,6 +949,7 @@ function QueueBanner({
   };
   myPlayerId: string | null;
 }) {
+  const T = useT();
   const myWaitIndex = queue.waiting.findIndex((w) => w.playerId === myPlayerId);
   const iAmProcessing = queue.processingPlayerId === myPlayerId;
 
@@ -970,16 +983,24 @@ function QueueBanner({
           />
           <span>
             {iAmProcessing ? (
-              <>Anlatıcı <strong style={{ color: '#d4a843' }}>sana</strong> yazıyor…</>
+              <>
+                {T.game.narratorWritingToYouPrefix}
+                <strong style={{ color: '#d4a843' }}>{T.game.narratorWritingToYouSubject}</strong>
+                {T.game.narratorWritingToYouSuffix}
+              </>
             ) : (
-              <>Anlatıcı <strong style={{ color: '#d4a843' }}>{queue.processingPlayerName}</strong>'e yazıyor…</>
+              <>
+                {T.game.narratorWritingToOtherPrefix}
+                <strong style={{ color: '#d4a843' }}>{queue.processingPlayerName}</strong>
+                {T.game.narratorWritingToOtherSuffix}
+              </>
             )}
           </span>
         </div>
       )}
       {queue.waiting.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <span style={{ color: '#5a5545' }}>Sırada:</span>
+          <span style={{ color: '#5a5545' }}>{T.game.queueLabel}</span>
           {queue.waiting.map((w, i) => {
             const isMe = w.playerId === myPlayerId;
             return (

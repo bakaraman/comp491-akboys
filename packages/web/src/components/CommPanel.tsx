@@ -20,7 +20,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import type { PlayerDataDTO, CommMessageDTO } from '@/types/shared';
-import { T } from '@/lib/tr';
+import { useT } from '@/hooks/useLocale';
 
 interface CommPanelProps {
   isOpen: boolean;
@@ -45,6 +45,7 @@ export function CommPanel({
 }: CommPanelProps) {
   // `players` and `onSendDirect` props are accepted but unused — kept on the
   // signature so callers don't need to update on this incremental rename.
+  const T = useT();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -128,7 +129,7 @@ export function CommPanel({
               {T.evidence.subtitle}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Kapat" style={{
+          <button onClick={onClose} aria-label={T.game.closeAria} style={{
             background: 'none', border: 'none', color: '#6a6050',
             fontSize: '18px', cursor: 'pointer', padding: '4px 8px',
           }}>

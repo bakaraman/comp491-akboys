@@ -12,7 +12,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { T } from '@/lib/tr';
+import { useLocale, useT } from '@/hooks/useLocale';
 import { getAuthHeaders } from '@/lib/firebase';
 import { ReconstructionReplay } from './ReconstructionReplay';
 
@@ -37,6 +37,8 @@ export function FinaleCinematic({
   onHome,
   onPlayAgain,
 }: FinaleCinematicProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const [fullText, setFullText] = useState('');
   const [streamDone, setStreamDone] = useState(false);
   const [visibleChars, setVisibleChars] = useState(0);
@@ -94,7 +96,7 @@ export function FinaleCinematic({
         const res = await fetch(`${API_BASE}/api/chat/finale`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ sessionId, outcome }),
+          body: JSON.stringify({ sessionId, outcome, locale }),
         });
         if (!res.ok || !res.body) {
           console.error(`${DEBUG} stream HTTP ${res.status}`);
@@ -171,7 +173,11 @@ export function FinaleCinematic({
         const res = await fetch(`${API_BASE}/api/chat/tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ text: fullText, voice: 'ash' }),
+          body: JSON.stringify({
+            text: fullText,
+            locale,
+            voice: locale === 'en' ? 'onyx' : 'ash',
+          }),
         });
         if (!res.ok) {
           console.error(`${DEBUG} TTS HTTP ${res.status}`);
@@ -323,7 +329,7 @@ export function FinaleCinematic({
               marginBottom: '28px',
             }}
           >
-            Gerçek Katil · <span style={{ color: '#d4a843' }}>{culpritName}</span>
+            {T.finale.trueCulprit} · <span style={{ color: '#d4a843' }}>{culpritName}</span>
           </p>
         )}
 

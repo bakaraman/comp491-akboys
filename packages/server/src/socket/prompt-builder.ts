@@ -166,15 +166,23 @@ ${playerList}
 ${worldLog}
 CURRENT ACTION BY: ${actingPlayerName} (in room "${actingPlayerRoom}")
 
-Respond with a JSON object:
+Respond with a JSON object that EXACTLY matches the strict schema:
 {
-  "response": "<Turkish narrator text for ${actingPlayerName}>",
-  "observed": "",
-  "directives": [ { "type": "MOVE", "player": "${actingPlayerName}", "target": "<room_id>" } ]  // only include if the player changes room
+  "response": { "tr": "<Turkish narrator text for ${actingPlayerName}>", "en": "<English narrator text — same content, native English>" },
+  "observed": { "tr": "", "en": "" },
+  "directives": [ { "type": "MOVE", "player": "${actingPlayerName}", "target": "<room_id>", "detail": "" } ]
 }
 
+CRITICAL OUTPUT RULES (#58):
+- "response.tr" and "response.en" MUST be PROSE STRINGS — narrator text that the player will read directly.
+- NEVER nest another JSON object, schema, or stringified JSON inside response.tr or response.en. NO curly braces, NO "response":, NO "directives":, NO embedded schemas. Just prose. The OUTER object is the only JSON.
+- The English must be semantically identical to the Turkish — same details, same tone, same length. NOT a literal translation; rewrite for natural English flow.
+- If the player did not change rooms, the directives array must be empty: [].
+- "observed" stays as an empty bilingual pair: { "tr": "", "en": "" }.
+
 RESPONSE RULES:
-- WRITE IN TURKISH. Clear, direct, natural prose. **Normal bir anlatıcı gibi anlat.** Address the player as "sen".
+- response.tr: Clear, direct, natural Turkish. **Normal bir anlatıcı gibi anlat.** Address the player as "sen".
+- response.en: Clear, direct, native English. Address the player as "you".
 - 1-2 short paragraphs, maximum 4-5 sentences. No literary flourishes, no poetic metaphors, no "edebi" heavy style.
 - Every sentence should move the story forward with a concrete fact, observation, or action. If it's filler, cut it.
 - Short sentences. Plain, readable Turkish.
@@ -231,14 +239,26 @@ export function buildCombinedUserMessage(actions: PlayerAction[]): string {
 /*  Structured response parser                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * #58 — Narrator output is bilingual. privateResponse and observedLine
+ * carry both languages so the emit layer can flatten per-socket using
+ * pickLang(field, player.locale).
+ */
+export interface BilingualText { tr: string; en: string; }
+
 export interface ScopedNarratorOutput {
-  privateResponse: string;
-  observedLine: string;
+  privateResponse: BilingualText;
+  observedLine: BilingualText;
   directives: ParsedDirective[];
 }
 
+const FALLBACK_PRIVATE: BilingualText = {
+  tr: '*Anlatıcı bir an duraksıyor...*',
+  en: '*The narrator hesitates for a moment...*',
+};
+
 export function parseStructuredResponse(
-  json: { response: string; observed: string; directives: Array<{ type: string; player: string; target: string; detail?: string }> },
+  json: { response: BilingualText; observed: BilingualText; directives: Array<{ type: string; player: string; target: string; detail?: string }> },
   actorName: string,
   actionText: string,
 ): ScopedNarratorOutput {
@@ -251,8 +271,19 @@ export function parseStructuredResponse(
       target: d.target,
     }));
 
-  const privateResponse = (json.response || '').trim() || '*Anlatıcı bir an duraksıyor...*';
-  const observedLine = (json.observed || '').trim();
+  const responseTr = (json.response?.tr || '').trim();
+  const responseEn = (json.response?.en || '').trim();
+  const observedTr = (json.observed?.tr || '').trim();
+  const observedEn = (json.observed?.en || '').trim();
+
+  const privateResponse: BilingualText = {
+    tr: responseTr || FALLBACK_PRIVATE.tr,
+    en: responseEn || responseTr || FALLBACK_PRIVATE.en,
+  };
+  const observedLine: BilingualText = {
+    tr: observedTr,
+    en: observedEn || observedTr,
+  };
   void actorName; void actionText;
 
   return { privateResponse, observedLine, directives };
@@ -260,7 +291,9 @@ export function parseStructuredResponse(
 
 /**
  * Legacy [MOVE: name -> room] bracket parser. Kept as a safety net when
- * structured JSON output is unavailable.
+ * structured JSON output is unavailable. Output is single-language Turkish
+ * (legacy streaming response is unilingual); the EN slice mirrors the TR
+ * so EN players still see *something* instead of an empty bubble.
  */
 export function parseLegacyTextResponse(raw: string, actorName: string, actionText: string): ScopedNarratorOutput {
   void actorName; void actionText;
@@ -275,8 +308,12 @@ export function parseLegacyTextResponse(raw: string, actorName: string, actionTe
     });
   }
   const cleaned = raw.replace(/\[MOVE:\s*.+?\s*->\s*.+?\]\n?/gi, '').trim();
-  const privateResponse = cleaned.length >= 5 ? cleaned : '*Anlatıcı bir an duraksıyor...*';
-  return { privateResponse, observedLine: '', directives };
+  const body = cleaned.length >= 5 ? cleaned : FALLBACK_PRIVATE.tr;
+  return {
+    privateResponse: { tr: body, en: body },
+    observedLine: { tr: '', en: '' },
+    directives,
+  };
 }
 
 /* ------------------------------------------------------------------ */

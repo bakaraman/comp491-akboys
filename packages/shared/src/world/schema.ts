@@ -1,17 +1,40 @@
 /**
- * schema.ts — Procedural world Zod schema (minimal)
+ * schema.ts — Procedural world Zod schema (bilingual after #58)
  *
- * Trimmed to what the runtime actually uses: rooms, NPCs (rich context),
- * items, entry scenes, solution. No evidence chains, no sanity, no
- * disposition tracking — narrator handles all that in natural language.
+ * Two-tier content model:
+ *   - PROPER NOUNS (single strings): NPC names, room names, item names —
+ *     culturally consistent with the world setting (Istanbul setting →
+ *     Turkish names; LA setting → English names). Same for every player.
+ *   - DESCRIPTIVE FIELDS (BilingualString = {tr, en}): everything else
+ *     the player sees or hears. Single LLM call produces both languages
+ *     so the story is semantically identical, only the spoken language
+ *     differs per player.
  *
- * Player-facing text fields are Turkish. Technical IDs stay snake_case English.
+ * Technical IDs stay snake_case English. Image prompts stay English.
  *
  * @author AKBOYS Team
- * @since 2026-04-17
+ * @since 2026-04-17 (original), 2026-05-13 (bilingual)
  */
 
 import { z } from 'zod';
+
+/* ------------------------------------------------------------------ */
+/*  Bilingual primitive                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A descriptive field produced by the LLM in BOTH languages in a single
+ * generation call so player A reads TR and player B reads EN about the
+ * exact same content, beat-for-beat.
+ */
+export const BilingualStringSchema = z.object({
+  tr: z.string().describe('Turkish version. Native, natural prose.'),
+  en: z.string().describe(
+    'English version. Native, natural prose. Must be semantically identical to the Turkish — same details, same tone, same pacing. NOT a literal word-for-word translation; rewrite for native English flow.',
+  ),
+});
+
+export type BilingualString = z.infer<typeof BilingualStringSchema>;
 
 /* ------------------------------------------------------------------ */
 /*  Enums                                                              */
@@ -35,9 +58,13 @@ const WorldRoomSchema = z.object({
   id: z.string().describe(
     'snake_case English ID, e.g. "control_bridge" or "wine_cellar". Must be unique.',
   ),
-  name: z.string().describe('Turkish name shown to players, e.g. "Kumanda Köprüsü".'),
-  description: z.string().describe(
-    'Turkish atmospheric description, 1-2 sentences. Used by narrator as context.',
+  name: z.string().describe(
+    'PROPER NOUN — room name shown to ALL players regardless of locale. '
+      + 'Match the cultural setting (e.g. "Eski Saray" in an Istanbul story, '
+      + '"The Velvet Lounge" in a 1927 Chicago story). Single string, not bilingual.',
+  ),
+  description: BilingualStringSchema.describe(
+    'Atmospheric description, 1-2 sentences in BOTH languages.',
   ),
   exits: z.object({
     north: z.string().nullable(),
@@ -58,47 +85,58 @@ const WorldRoomSchema = z.object({
 
 const WorldNpcSchema = z.object({
   id: z.string().describe('snake_case English ID, e.g. "bartender_mickey".'),
-  name: z.string().describe('Turkish full name, e.g. "Mickey Malone".'),
-  role: z.string().describe('Turkish role/occupation, e.g. "barmen", "mühendis".'),
+  name: z.string().describe(
+    'PROPER NOUN — full name shown to ALL players regardless of locale. '
+      + 'Match the cultural setting. Single string, not bilingual.',
+  ),
+  role: BilingualStringSchema.describe(
+    'Role/occupation in BOTH languages, e.g. {tr:"barmen", en:"bartender"}.',
+  ),
   roomId: z.string().describe('ID of the room where this NPC starts.'),
-  description: z.string().describe(
-    'Turkish physical + manner description, 1-2 sentences. Noir tone.',
+  description: BilingualStringSchema.describe(
+    'Physical + manner description, 1-2 sentences in BOTH languages. Match the genre tone.',
   ),
   portraitPrompt: z.string().describe(
     'English prompt for portrait image. Prefixed with visualStylePrompt. '
       + 'Head-and-shoulders, period-appropriate clothing, distinctive feature.',
   ),
   personality: NpcPersonalityEnum,
-  alibiClaim: z.string().describe('Turkish: what this NPC tells detectives they were doing (short summary used in quick references).'),
+  alibiClaim: BilingualStringSchema.describe(
+    'Short summary of what this NPC tells detectives they were doing. BOTH languages.',
+  ),
   alibi: z.object({
-    claimedLocation: z.string().describe('Turkish: specific location this NPC claims to have been.'),
-    claimedActivity: z.string().describe('Turkish: what this NPC claims to have been doing there.'),
-    corroboratedBy: z.string().nullable().describe('Turkish: name of the NPC who can corroborate this alibi, or null if none.'),
-    inconsistency: z.string().nullable().describe(
-      'For the CULPRIT: a specific, player-discoverable contradiction in this alibi '
-        + '(e.g. "claims the garden gate was open, but groundskeeper locked it at 21:00"). '
-        + 'For innocent NPCs: null.',
+    claimedLocation: BilingualStringSchema.describe('Specific location this NPC claims to have been. BOTH languages.'),
+    claimedActivity: BilingualStringSchema.describe('What this NPC claims to have been doing there. BOTH languages.'),
+    corroboratedBy: z.string().nullable().describe(
+      'Name (proper noun, single string) of the NPC who can corroborate this alibi, or null.',
     ),
-  }).describe('Structured alibi the NPC gives when interrogated. Narrator uses this to voice believable defenses.'),
-  backstory: z.string().describe(
-    'Turkish: 2-3 sentence personal history that shapes this character\'s voice. '
-      + 'Must be distinct enough that the narrator sounds different for each NPC.',
+    inconsistency: BilingualStringSchema.nullable().describe(
+      'For the CULPRIT: a specific, player-discoverable contradiction in this alibi. '
+        + 'For innocent NPCs: null. BOTH languages when present.',
+    ),
+  }).describe('Structured alibi the NPC gives when interrogated.'),
+  backstory: BilingualStringSchema.describe(
+    '2-3 sentence personal history in BOTH languages. Must be distinct enough that '
+      + 'the narrator sounds different for each NPC.',
   ),
-  knownInfo: z.string().describe(
-    'Turkish: what this NPC actually knows. Narrator context only — never revealed directly unless pressed.',
+  knownInfo: BilingualStringSchema.describe(
+    'What this NPC actually knows. Narrator context only — never revealed directly unless pressed. BOTH languages.',
   ),
-  hiddenSecret: z.string().nullable().describe(
-    'Turkish: something this NPC hides. For innocents: unrelated (affair, theft, debt). '
-      + 'For culprit: the actual motive or key detail. Null only if NPC has nothing to hide.',
+  hiddenSecret: BilingualStringSchema.nullable().describe(
+    'Something this NPC hides. For innocents: unrelated (affair, theft, debt). '
+      + 'For culprit: the actual motive or key detail. Null only if NPC has nothing to hide. BOTH languages when present.',
   ),
   isCulprit: z.boolean().describe('True ONLY for the single culprit. Exactly one NPC must have this true.'),
 });
 
 const WorldItemSchema = z.object({
   id: z.string().describe('snake_case English ID, e.g. "grease_stained_glove".'),
-  name: z.string().describe('Turkish name, e.g. "Yağ Lekeli Eldiven".'),
-  description: z.string().describe(
-    'Turkish: what the narrator says when this item is noticed or examined.',
+  name: z.string().describe(
+    'PROPER NOUN — item name shown to ALL players regardless of locale. '
+      + 'Match the cultural setting. Single string, not bilingual.',
+  ),
+  description: BilingualStringSchema.describe(
+    'What the narrator says when this item is noticed or examined. BOTH languages.',
   ),
   roomId: z.string().describe('ID of the room where this item starts.'),
   isEvidence: z.boolean().describe(
@@ -115,27 +153,27 @@ const WorldItemSchema = z.object({
 
 const EntrySceneSchema = z.object({
   roomId: z.string().describe('Room ID where this player starts.'),
-  narrativeHook: z.string().describe(
-    'Turkish 3-5 sentences, second person ("uyanıyorsun..."). Sets mood. '
-      + 'References 1-2 items or NPCs in the room by Turkish name. Literary tone. '
-      + 'This is broadcast to the player as their private opening scene.',
+  narrativeHook: BilingualStringSchema.describe(
+    '3-5 sentences in BOTH languages, second person ("uyanıyorsun..." / "you wake up..."). '
+      + 'Sets mood. References 1-2 items or NPCs in the room by their proper-noun name. '
+      + 'Literary tone consistent with the genre.',
   ),
 });
 
 const SolutionSchema = z.object({
   culpritNpcId: z.string().describe('ID of the NPC with isCulprit=true.'),
-  motiveShort: z.string().describe('Turkish: one sentence motive.'),
+  motiveShort: BilingualStringSchema.describe('One sentence motive in BOTH languages.'),
   keyEvidenceId: z.string().describe(
     'The item ID that best points to the culprit. Used only for finale narration context.',
   ),
 });
 
 const WorldMetaSchema = z.object({
-  title: z.string().describe(
-    'Turkish evocative title, e.g. "The Velvet Shadow" or "Yalnız Kovboy". Used in UI.',
+  title: BilingualStringSchema.describe(
+    'Evocative case-file title in BOTH languages, e.g. {tr:"Kadife Gölge Cinayetleri", en:"The Velvet Shadow Murders"}.',
   ),
-  setting: z.string().describe(
-    'Turkish 1-2 sentence setting. Where + when. Shown on loading + opening screens.',
+  setting: BilingualStringSchema.describe(
+    '1-2 sentence setting in BOTH languages. Where + when.',
   ),
   visualStylePrompt: z.string().describe(
     'English art direction sentence for ALL images in this world. '
@@ -166,13 +204,13 @@ export const WorldSchema = z.object({
     'Exactly playerCount entries. Each player starts in a DIFFERENT room. '
       + 'Each entry has a personalized narrative hook.',
   ),
-  openingNarration: z.string().describe(
-    'Turkish 4-6 sentences — this is the ONLY text shown on the opening cinematic '
-      + 'and read aloud by TTS. WEAVE IN the era, location, and atmospheric details '
-      + '(what was in meta.setting) naturally — no separate setting line is displayed, '
-      + 'so everything the player should hear about where and when they are must live here. '
-      + 'Clear, direct, natural Turkish prose. Short sentences. No literary flourishes, '
-      + 'no ornamental metaphors — normal anlatıcı tonu, ne daha fazlası ne daha azı.',
+  openingNarration: BilingualStringSchema.describe(
+    '4-6 sentences in BOTH languages — this is the text shown on the opening cinematic '
+      + 'and read aloud by TTS. WEAVE IN the era, location, and atmospheric details from '
+      + 'meta.setting naturally — no separate setting line is displayed, so everything the '
+      + 'player should hear about where and when they are must live here. '
+      + 'Clear, direct, natural prose. Short sentences. No ornamental metaphors — '
+      + 'normal narrator tone in each language.',
   ),
   solution: SolutionSchema,
 });

@@ -28,6 +28,8 @@ export type {
   HiddenExit,
   ReconstructionEvent,
   ReconstructionDTO,
+  Locale,
+  Bilingual,
 } from './game.js';
 
 export { PLAYER_COLORS, PLAYER_ROLES } from './game.js';

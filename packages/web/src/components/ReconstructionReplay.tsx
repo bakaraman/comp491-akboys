@@ -24,7 +24,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReconstructionDTO } from '@/types/shared';
-import { T } from '@/lib/tr';
+import { useLocale, useT } from '@/hooks/useLocale';
+import { pickLang } from '@/lib/i18n';
 import { getAuthHeaders } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
@@ -38,6 +39,7 @@ export interface ReconstructionReplayProps {
 }
 
 export function ReconstructionReplay({ sessionId, onClose }: ReconstructionReplayProps): React.ReactElement {
+  const T = useT();
   const [status, setStatus] = useState<LoadStatus>('idle');
   const [data, setData] = useState<ReconstructionDTO | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
@@ -191,6 +193,7 @@ export function ReconstructionReplay({ sessionId, onClose }: ReconstructionRepla
 /* ------------------------------------------------------------------ */
 
 function ReplayLoading(): React.ReactElement {
+  const T = useT();
   return (
     <div style={{
       padding: '40px 0',
@@ -214,6 +217,7 @@ function ReplayLoading(): React.ReactElement {
 }
 
 function ReplayError({ message, onRetry }: { message: string; onRetry: () => void }): React.ReactElement {
+  const T = useT();
   return (
     <div style={{
       padding: '32px 0',
@@ -265,6 +269,8 @@ function ReplayBody({
   onNext,
   onToggleAutoplay,
 }: ReplayBodyProps): React.ReactElement {
+  const T = useT();
+  const { locale } = useLocale();
   const event = data.events[stepIndex];
   const total = data.events.length;
   const isFirst = stepIndex === 0;
@@ -365,7 +371,7 @@ function ReplayBody({
           color: '#e8e0d4',
           fontFamily: 'Georgia, serif',
         }}>
-          {event.description}
+          {pickLang(event.description, locale)}
         </p>
       </div>
 
@@ -396,7 +402,7 @@ function ReplayBody({
             fontFamily: 'Georgia, serif',
             fontStyle: 'italic',
           }}>
-            {data.conclusion}
+            {pickLang(data.conclusion, locale)}
           </p>
         </div>
       )}
