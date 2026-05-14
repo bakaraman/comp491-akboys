@@ -150,6 +150,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const tutorialAutoTriggeredRef = useRef(false);
   useEffect(() => {
     if (!isMultiplayer) return;
+    if (isSpectator) return;
     // Auto-trigger once when gameplay UI becomes visible: gameState is
     // 'playing' AND opening cinematic has been dismissed. The ref guard
     // ensures we only auto-show once per page mount.
