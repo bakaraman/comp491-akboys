@@ -428,6 +428,15 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setTurnInfo({ turnCount, maxTurns });
     });
 
+    /* -- Directive rejected (#60) — show brief toast so player knows move failed -- */
+    socket.on('directive:rejected', ({ type, target }) => {
+      const msg = type === 'MOVE'
+        ? `Hareket başarısız: "${target}" bulunamadı.`
+        : `Eylem reddedildi: ${type} → ${target}`;
+      setToast(msg);
+      setTimeout(() => setToast(null), 4000);
+    });
+
     /* -- Connect -- */
     socket.connect();
 

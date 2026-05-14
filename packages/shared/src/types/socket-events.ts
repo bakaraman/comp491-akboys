@@ -390,6 +390,14 @@ export interface ServerToClientEvents {
     maxTurns: number;
   }) => void;
 
+  /** Directive rejected after fuzzy-match recovery failed (#60) */
+  'directive:rejected': (data: {
+    playerId: string;
+    type: string;
+    target: string;
+    reason: string;
+  }) => void;
+
   /* ---- Voice chat (V-key walkie-talkie) ---- */
   /** Sent to a freshly-joined peer with the current voice participant list */
   'voice:participants': (data: { peerIds: string[] }) => void;
