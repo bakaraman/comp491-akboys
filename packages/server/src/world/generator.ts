@@ -116,6 +116,35 @@ function buildUserPrompt(hostPrompt: string, playerCount: number): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  BFS reachability helper                                            */
+/* ------------------------------------------------------------------ */
+
+function bfsReachableRooms(world: WorldData): Set<string> {
+  const roomMap = new Map(world.rooms.map((r) => [r.id, r]));
+  const visited = new Set<string>();
+  // Multi-source BFS: start from every player entry room simultaneously
+  const queue: string[] = world.entryScenes
+    .map((e) => e.roomId)
+    .filter((id) => roomMap.has(id));
+
+  for (const id of queue) visited.add(id);
+
+  let i = 0;
+  while (i < queue.length) {
+    const room = roomMap.get(queue[i++]);
+    if (!room) continue;
+    for (const target of Object.values(room.exits)) {
+      if (target !== null && !visited.has(target) && roomMap.has(target)) {
+        visited.add(target);
+        queue.push(target);
+      }
+    }
+  }
+
+  return visited;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Semantic validators                                                */
 /* ------------------------------------------------------------------ */
 
@@ -195,6 +224,25 @@ export function validateWorld(world: WorldData, expectedPlayerCount: number): Va
   const redHerringCount = world.items.filter((i) => i.isRedHerring).length;
   if (redHerringCount < 1) {
     errors.push('Expected at least 1 red herring item (isRedHerring: true), got 0');
+  }
+
+  // 9. BFS reachability — every room must be reachable from at least one entry scene
+  const reachable = bfsReachableRooms(world);
+  const unreachableRooms = world.rooms.filter((r) => !reachable.has(r.id)).map((r) => r.id);
+  if (unreachableRooms.length > 0) {
+    errors.push(`Unreachable rooms: ${unreachableRooms.join(', ')}`);
+  }
+
+  // 10. Culprit's starting room must be reachable
+  const culpritNpc = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
+  if (culpritNpc && !reachable.has(culpritNpc.roomId)) {
+    errors.push(`Culprit NPC room unreachable: ${culpritNpc.roomId}`);
+  }
+
+  // 11. Key evidence's room must be reachable
+  const keyEvidence = world.items.find((i) => i.id === world.solution.keyEvidenceId);
+  if (keyEvidence && !reachable.has(keyEvidence.roomId)) {
+    errors.push(`Key evidence room unreachable: ${keyEvidence.roomId}`);
   }
 
   return { valid: errors.length === 0, errors };
