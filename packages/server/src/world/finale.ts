@@ -11,14 +11,11 @@
  * @since 2026-04-17
  */
 
-import OpenAI from 'openai';
 import type { WorldData } from '@akboys/shared';
+import { openaiStreamClient } from '../lib/openai-client.js';
+import { withOpenAIRetry } from '../lib/openai-retry.js';
+import { logOpenAIUsage } from '../lib/usage-logger.js';
 
-let _client: OpenAI | null = null;
-function client(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
-}
 const DEBUG = '[finale]';
 
 export type FinaleOutcome = 'won' | 'lost_wrong' | 'lost_timeout';
@@ -33,6 +30,7 @@ export interface GenerateFinaleInput {
   worldStateLog: string[];
   turnCount: number;
   maxTurns: number;
+  sessionId?: string;
 }
 
 function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: string } {
@@ -116,22 +114,59 @@ export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<
   const { system, user } = buildFinalePrompt(input);
   console.log(`${DEBUG} streaming finale: outcome=${input.outcome}`);
 
+  const FINALE_MODEL = 'gpt-5.4';
   const t0 = Date.now();
-  const stream = await client().chat.completions.create({
-    model: 'gpt-5.4',
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    max_completion_tokens: 1500, // leave room for reasoning tokens
-    reasoning_effort: 'medium',
-    stream: true,
-  });
+  const stream = await withOpenAIRetry('finale', () =>
+    openaiStreamClient().chat.completions.create({
+      model: FINALE_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_completion_tokens: 1500, // leave room for reasoning tokens
+      reasoning_effort: 'medium',
+      stream: true,
+      stream_options: { include_usage: true },
+    }),
+  );
   console.log(`${DEBUG} stream opened (${Date.now() - t0}ms)`);
 
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta) yield delta;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let reasoningTokens = 0;
+  try {
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) yield delta;
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens ?? 0;
+        outputTokens = chunk.usage.completion_tokens ?? 0;
+        reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? 0;
+      }
+    }
+    logOpenAIUsage({
+      model: FINALE_MODEL,
+      purpose: 'finale',
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      durationMs: Date.now() - t0,
+      sessionId: input.sessionId,
+      success: true,
+    });
+  } catch (err) {
+    logOpenAIUsage({
+      model: FINALE_MODEL,
+      purpose: 'finale',
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      durationMs: Date.now() - t0,
+      sessionId: input.sessionId,
+      success: false,
+      errorTag: (err as Error).name ?? 'stream-error',
+    });
+    throw err;
   }
 }
 

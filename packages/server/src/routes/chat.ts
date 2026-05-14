@@ -134,17 +134,25 @@ async function streamResponse(
   let fullText = '';
   let chunkCount = 0;
 
-  for await (const chunk of narratorChatStream(buildSystemPrompt(scenario), session.history)) {
-    chunkCount += 1;
-    fullText += chunk;
-    if (chunkCount <= 5 || chunkCount % 25 === 0) {
-      console.log(`${DEBUG_PREFIX} stream:chunk`, {
-        sessionId,
-        chunkCount,
-        currentLength: fullText.length,
-      });
+  try {
+    for await (const chunk of narratorChatStream(buildSystemPrompt(scenario), session.history, sessionId)) {
+      chunkCount += 1;
+      fullText += chunk;
+      if (chunkCount <= 5 || chunkCount % 25 === 0) {
+        console.log(`${DEBUG_PREFIX} stream:chunk`, {
+          sessionId,
+          chunkCount,
+          currentLength: fullText.length,
+        });
+      }
+      res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
     }
-    res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+  } catch (err) {
+    const message = (err as Error).message || 'stream interrupted';
+    console.error(`${DEBUG_PREFIX} stream:error`, { sessionId, message });
+    res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+    res.end();
+    return;
   }
 
   store.addMessage(sessionId, { role: 'assistant', content: fullText, timestamp: Date.now() });
@@ -348,7 +356,7 @@ chatRouter.post('/suggestions', requireAuth, async (req: Request, res: Response)
       res.json({ suggestions: buildContextFallbacks(ctx) });
       return;
     }
-    const suggestions = await suggestFollowUps(lastAssistant.content, ctx);
+    const suggestions = await suggestFollowUps(lastAssistant.content, ctx, req.body?.sessionId);
     res.json({ suggestions });
   } catch (err) {
     console.error('[suggestions] error:', err);
@@ -392,7 +400,7 @@ chatRouter.post('/image', requireAuth, async (req: Request, res: Response) => {
     const roomLabel = matchedRoom?.name || roomName;
     const roomDescription = matchedRoom?.description || roomName;
     const prompt = `${SCENARIO_STYLES[session.scenarioId] || 'Detailed atmospheric illustration of '}${roomLabel}. ${roomDescription}`;
-    const imageUrl = await generateSceneImage(prompt);
+    const imageUrl = await generateSceneImage(prompt, sessionId);
 
     if (imageUrl) {
       imageCache.set(cacheKey, imageUrl);
@@ -572,10 +580,12 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
       res.status(400).json({ error: 'text is required' });
       return;
     }
+    const sessionIdHeader = (req.body as { sessionId?: string })?.sessionId;
     const ttsRes = await streamTts({
       text,
       voice: (voice as 'ash' | 'ballad' | 'fable' | 'verse' | 'shimmer' | 'nova' | 'coral' | 'alloy' | 'onyx' | 'sage' | 'echo' | undefined) ?? 'ash',
       format: 'mp3',
+      sessionId: sessionIdHeader,
     });
 
     const buf = Buffer.from(await ttsRes.arrayBuffer());
@@ -627,6 +637,7 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
         worldStateLog: session.worldStateLog,
         turnCount: session.mpTurnCount,
         maxTurns: finaleMaxTurns,
+        sessionId,
       })) {
         fullText += chunk;
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
@@ -637,6 +648,8 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
       res.end();
     } catch (err) {
       console.error(`${DEBUG_PREFIX} finale stream error`, err);
+      const message = (err as Error).message || 'finale stream interrupted';
+      try { res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`); } catch { /* */ }
       try { res.end(); } catch { /* */ }
     }
   } catch (err) {
@@ -691,7 +704,7 @@ chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Respon
     }
 
     const generation = (async (): Promise<ReconstructionDTO> => {
-      const dto = await generateReconstruction(session.world!, session.worldStateLog);
+      const dto = await generateReconstruction(session.world!, session.worldStateLog, sessionId);
       store.setReconstruction(sessionId, dto);
       return dto;
     })();
