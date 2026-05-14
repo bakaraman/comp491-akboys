@@ -113,6 +113,14 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
   const [typingPlayers, setTypingPlayers] = useState<Map<string, string>>(new Map());
   const [isNarratorStreaming, setIsNarratorStreaming] = useState(false);
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null);
+  /**
+   * True from the moment THIS player sends an action until the matching
+   * narrator:done arrives. Used to block the ChatInput so a second
+   * action can't be queued before the first one resolves — without this,
+   * a slow narrator call lets the player stack a fast follow-up and the
+   * responses sometimes arrived in the wrong order.
+   */
+  const [isMyActionPending, setIsMyActionPending] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
@@ -276,14 +284,13 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       });
     });
 
-    /* -- Narrator events (scoped server-side) --
-     * The server already fans narrator events out only to: the actor + all
-     * connected players in the same room. So if we receive the event at all,
-     * we're part of the intended audience — just render it, don't re-filter.
-     * Only skip streaming-state updates when the chunk is for a DIFFERENT
-     * acting player (so the banner doesn't flicker showing "yazıyor" to
-     * witnesses before they'd logically see it). The final message still
-     * appears via narrator:done.
+    /* -- Narrator events (actor-only, post-#58) --
+     * Narrator prose is actor-only since #58 (witnesses get narrator:observed
+     * instead). Server emits narrator:chunk / narrator:done only to the actor's
+     * sockets via findSocketsForPlayer. We still defensively gate on
+     * targetPlayerId === me so a stale socket map, dev strict-mode duplicate
+     * listener, or any future regression can't leak the other player's
+     * (locale-flattened) narrator into our chat.
      */
     socket.on('narrator:chunk', ({ fullText, targetPlayerId }) => {
       const me = myPlayerIdRef.current;
@@ -296,14 +303,13 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     socket.on('narrator:done', ({ fullText, suggestions: sugg, targetPlayerId }) => {
       const me = myPlayerIdRef.current;
       const isForMe = !targetPlayerId || targetPlayerId === me;
-      if (isForMe) {
-        setIsNarratorStreaming(false);
-        setStreamingText('');
-        setBatchInfo(null);
-        setSuggestions(sugg);
-      }
-      // ALWAYS add the message to chat if we received it — server decides
-      // the audience (actor + same-room witnesses).
+      if (!isForMe) return;
+      setIsNarratorStreaming(false);
+      setStreamingText('');
+      setBatchInfo(null);
+      setSuggestions(sugg);
+      // v3 input lock release: my action has fully resolved, allow next prompt.
+      setIsMyActionPending(false);
       addMessage({
         role: 'assistant',
         content: fullText,
@@ -377,6 +383,9 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
       setError(message);
       setToast(message);
       setTimeout(() => setToast(null), 3000);
+      // Release the input lock so the player isn't stuck if their action
+      // was rejected (cooldown, invalid payload, etc.).
+      setIsMyActionPending(false);
     });
 
     /* -- Game start event -- */
@@ -449,6 +458,10 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     socket.on('session:gameover', ({ status, endReason, summary }) => {
       setGameOver({ status, endReason, summary });
       setGameState('ended');
+      // Release the input lock — game's over, ChatInput will be hidden behind
+      // the finale cinematic anyway, but clear the flag so any stale Promise
+      // doesn't keep it true forever.
+      setIsMyActionPending(false);
     });
 
     /* -- Procedural story generation events (Velvet Shadow v2) -- */
@@ -524,6 +537,10 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     (message: string) => {
       const socket = socketRef.current;
       if (!socket?.connected || !myPlayerId) return;
+      // v3 input lock: held until matching narrator:done arrives, see
+      // socket.on('narrator:done') above. Also blocks the ChatInput
+      // submit button via the prop wired in session/[id]/page.tsx.
+      setIsMyActionPending(true);
       socket.emit('player:action', { sessionId, playerId: myPlayerId, message });
     },
     [sessionId, myPlayerId],
@@ -663,6 +680,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     streamingText,
     typingPlayers,
     isNarratorStreaming,
+    isMyActionPending,
     batchInfo,
     actionQueue,
     isConnected,

@@ -150,3 +150,91 @@ export async function renderFinaleText(input: GenerateFinaleInput): Promise<stri
   }
   return full;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Bilingual finale — single LLM call, cached and reused per session  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * #58 follow-up: produce the finale in BOTH languages in a single LLM
+ * call so every client in the same session gets the same beat-for-beat
+ * story flattened into its own locale. Cached on the session — the
+ * second client (and any spectator) hits cache instead of triggering
+ * a parallel OpenAI stream.
+ *
+ * Differs from `streamFinale`/`renderFinaleText` (which are unilingual
+ * streaming) in that callers wait for both languages at once. Client
+ * UX still feels alive because the FinaleCinematic typewriter syncs
+ * with TTS audio, not the LLM stream.
+ */
+export interface GenerateBilingualFinaleInput {
+  world: WorldData;
+  outcome: FinaleOutcome;
+  accuserName?: string;
+  accusedNpcId?: string;
+  wrongAccusedNpcId?: string;
+  evidencePresentedId?: string;
+  worldStateLog: string[];
+  turnCount: number;
+  maxTurns: number;
+}
+
+export async function generateBilingualFinale(
+  input: GenerateBilingualFinaleInput,
+): Promise<{ tr: string; en: string; culpritName: string | null }> {
+  const trPrompt = buildFinalePrompt({ ...input, locale: 'tr' });
+  const enPrompt = buildFinalePrompt({ ...input, locale: 'en' });
+
+  const culprit = input.world.npcs.find((n) => n.id === input.world.solution.culpritNpcId);
+  const culpritName = culprit?.name ?? null;
+
+  /* Single combined call: ask the model for both languages in a strict
+   * JSON object. Re-use the per-language prompts so each side stays
+   * fully grounded in its own outcome block. */
+  const system = `You produce the FINALE of a mystery in BOTH Turkish and English in a single JSON object.
+
+The Turkish and English versions must be semantically identical — same beats, same names, same paragraph structure, just two languages. Native flow in each (NOT literal word-for-word translation).
+
+OUTPUT: a strict JSON object: { "tr": "<Turkish finale prose>", "en": "<English finale prose>" }. No commentary, no markdown.
+
+Each language must follow ITS OWN rule pack below.`;
+
+  const user = `### TURKISH RULE PACK
+${trPrompt.system}
+
+### TURKISH PROMPT BODY
+${trPrompt.user}
+
+### ENGLISH RULE PACK
+${enPrompt.system}
+
+### ENGLISH PROMPT BODY
+${enPrompt.user}
+
+Now produce the bilingual JSON now.`;
+
+  console.log(`${DEBUG} bilingual generation start: outcome=${input.outcome}`);
+  const t0 = Date.now();
+
+  const completion = await client().chat.completions.create({
+    model: 'gpt-5.4',
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    max_completion_tokens: 3000,
+    reasoning_effort: 'medium',
+    response_format: { type: 'json_object' },
+  });
+
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) throw new Error('Bilingual finale returned empty content');
+  const parsed = JSON.parse(raw) as { tr?: string; en?: string };
+  if (typeof parsed.tr !== 'string' || typeof parsed.en !== 'string') {
+    throw new Error('Bilingual finale missing tr/en fields');
+  }
+  console.log(
+    `${DEBUG} bilingual generation ✓ (${Date.now() - t0}ms, tr=${parsed.tr.length}c en=${parsed.en.length}c)`,
+  );
+  return { tr: parsed.tr.trim(), en: parsed.en.trim(), culpritName };
+}

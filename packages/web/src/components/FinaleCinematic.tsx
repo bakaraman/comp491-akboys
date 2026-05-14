@@ -84,63 +84,43 @@ export function FinaleCinematic({
     };
   }, []);
 
-  // Stream the finale text from the server
+  // Fetch the finale text (bilingual single-flight; #58 follow-up).
+  //
+  // Server now returns the full text in one JSON response — the SSE chunk
+  // protocol was retired so two clients with different locales no longer
+  // race two parallel OpenAI streams. UX still feels live because the
+  // visibleChars typewriter is driven by audio.currentTime once TTS plays.
   useEffect(() => {
     let cancelled = false;
     const t0 = Date.now();
 
-    async function stream() {
+    async function fetchFinale() {
       try {
-        console.log(`${DEBUG} stream start outcome=${outcome}`);
+        console.log(`${DEBUG} fetch start outcome=${outcome} locale=${locale}`);
         const headers = await getAuthHeaders();
         const res = await fetch(`${API_BASE}/api/chat/finale`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
           body: JSON.stringify({ sessionId, outcome, locale }),
         });
-        if (!res.ok || !res.body) {
-          console.error(`${DEBUG} stream HTTP ${res.status}`);
+        if (!res.ok) {
+          console.error(`${DEBUG} fetch HTTP ${res.status}`);
           if (!cancelled) {
             setFullText(summary);
             setStreamDone(true);
           }
           return;
         }
+        const data = (await res.json()) as { fullText?: string; culpritName?: string | null };
+        if (cancelled) return;
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let acc = '';
-
-        while (!cancelled) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.type === 'chunk') {
-                acc += evt.content;
-              } else if (evt.type === 'done') {
-                acc = evt.content || acc;
-                if (evt.culpritName) setCulpritName(evt.culpritName);
-              }
-            } catch {
-              // skip
-            }
-          }
-        }
-
-        if (!cancelled) {
-          console.log(`${DEBUG} stream done (${Date.now() - t0}ms, ${acc.length} chars)`);
-          setFullText(acc);
-          setStreamDone(true);
-        }
+        const acc = data.fullText ?? summary;
+        if (data.culpritName) setCulpritName(data.culpritName);
+        console.log(`${DEBUG} fetch done (${Date.now() - t0}ms, ${acc.length} chars)`);
+        setFullText(acc);
+        setStreamDone(true);
       } catch (err) {
-        console.error(`${DEBUG} stream error`, err);
+        console.error(`${DEBUG} fetch error`, err);
         if (!cancelled) {
           setFullText(summary);
           setStreamDone(true);
@@ -148,11 +128,11 @@ export function FinaleCinematic({
       }
     }
 
-    stream();
+    fetchFinale();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, outcome, summary]);
+  }, [sessionId, outcome, summary, locale]);
 
   // Once stream completes, fetch + play TTS and sync text reveal
   useEffect(() => {

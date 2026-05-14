@@ -100,7 +100,7 @@ export function ChatMessage({
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
-            Observed
+            {T.game.observedLabel}
           </div>
           <div style={{
             fontSize: '14px', color: '#8a8070',
@@ -207,7 +207,7 @@ export function ChatMessage({
             fontSize: '12px',
             fontStyle: 'italic',
           }}>
-            Visualizing scene...
+            {T.game.imageLoading}
           </div>
         )}
 

@@ -21,7 +21,7 @@ import {
 import { buildSceneContext } from '../socket/prompt-builder.js';
 import { requireAuth } from '../middleware/auth.js';
 import { SCENARIOS } from '@akboys/shared';
-import type { Scenario, ReconstructionDTO } from '@akboys/shared';
+import type { Locale, Scenario, ReconstructionDTO } from '@akboys/shared';
 import {
   FirestoreSessionStore,
   MemorySessionStore,
@@ -35,7 +35,7 @@ import {
   generateAllRoomImages,
   generateAllNpcPortraits,
   streamTts,
-  streamFinale,
+  generateBilingualFinale,
   generateReconstruction,
   type FinaleOutcome,
 } from '../world/index.js';
@@ -183,7 +183,13 @@ chatRouter.get('/scenarios', (_req: Request, res: Response) => {
   res.json({ scenarios: list });
 });
 
-/** GET /api/chat/session/:id — Get session info, history, and players */
+/** GET /api/chat/session/:id — Get session info, history, and players
+ *
+ * #58: accepts `?locale=en|tr` to flatten bilingual scenario metadata
+ * (NPC descriptions, room descriptions, item descriptions, scenario title)
+ * to the caller's preferred language. Defaults to 'tr' when absent so
+ * pre-#58 callers keep their existing behaviour.
+ */
 chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: Response) => {
   const session = store.get(req.params.id);
   if (!session) {
@@ -192,13 +198,15 @@ chatRouter.get('/session/:id', requireAuth, (req: Request<{ id: string }>, res: 
     return;
   }
 
-  const scenario = getScenarioForSession(session);
+  const locale: Locale = req.query.locale === 'en' ? 'en' : 'tr';
+  const scenario = getScenarioForSession(session, locale);
   console.log(`${DEBUG_PREFIX} session:get`, {
     sessionId: session.id,
     historyLength: session.history.length,
     conversationLength: session.gameState.conversationHistory.length,
     state: session.state,
     maxPlayers: session.maxPlayers,
+    locale,
   });
   res.json({
     id: session.id,
@@ -250,14 +258,19 @@ chatRouter.get('/session/:id/gamestate', requireAuth, (req: Request<{ id: string
   res.json(session.gameState);
 });
 
-/** GET /api/chat/room/:code — Look up a session by its 6-char room code */
+/** GET /api/chat/room/:code — Look up a session by its 6-char room code
+ *
+ * #58: same `?locale=en|tr` contract as /session/:id — drives the
+ * scenarioTitle slice returned to the caller.
+ */
 chatRouter.get('/room/:code', requireAuth, (req: Request<{ code: string }>, res: Response) => {
   const session = store.getByRoomCode(req.params.code);
   if (!session) {
     res.status(404).json({ error: 'Room not found' });
     return;
   }
-  const scenario = getScenarioForSession(session);
+  const locale: Locale = req.query.locale === 'en' ? 'en' : 'tr';
+  const scenario = getScenarioForSession(session, locale);
   res.json({
     sessionId: session.id,
     scenarioId: session.scenarioId,
@@ -596,7 +609,18 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
 });
 
 /* ================================================================== */
-/*  POST /api/chat/finale — SSE stream of AI-generated finale         */
+/*  POST /api/chat/finale — bilingual single-flight cached finale     */
+/*                                                                     */
+/*  Pre-#58 we streamed the finale via SSE per-locale, so two clients  */
+/*  (e.g. one TR + one EN) triggered two independent OpenAI calls that  */
+/*  competed for rate limits — one returned in 5s while the other was  */
+/*  stuck for 30+. Now we run a single bilingual LLM call, cache the   */
+/*  result on the session, and return the caller's locale slice. The   */
+/*  second client gets a cache hit; spectators / refreshes are free.   */
+/*                                                                     */
+/*  UX-wise the FinaleCinematic already syncs its typewriter to the    */
+/*  TTS audio.currentTime, so losing the LLM-level streaming is        */
+/*  invisible — the user-perceived reveal speed comes from TTS playback.*/
 /* ================================================================== */
 chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -614,39 +638,65 @@ chatRouter.post('/finale', requireAuth, async (req: Request, res: Response) => {
     if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
     if (!session.world) { res.status(400).json({ error: 'No generated world for this session' }); return; }
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+    /* ---- Cache hit: cheapest path ---- */
+    const cached = session.finaleText;
+    if (cached && cached.outcome === outcome) {
+      const sliced = cached[locale];
+      console.log(`[finale ${sessionId.slice(0, 8)}] ✓ cache hit (${sliced.length}c, locale=${locale})`);
+      res.json({ fullText: sliced, culpritName: cached.culpritName });
+      return;
+    }
 
+    /* ---- Single-flight: await the in-flight Promise if another client raced us ---- */
+    const inflight = store.getInflightFinale(sessionId);
+    if (inflight) {
+      console.log(`[finale ${sessionId.slice(0, 8)}] ⇢ awaiting in-flight bilingual generation (locale=${locale})`);
+      try {
+        const out = await inflight;
+        if (out.outcome !== outcome) {
+          // Extremely unlikely, but cover the case where a stale in-flight Promise
+          // belongs to a different outcome (e.g. accusation flipped before the
+          // first call resolved). Fall through to a fresh generation.
+          console.warn(`[finale ${sessionId.slice(0, 8)}] outcome mismatch (${out.outcome} != ${outcome}); regenerating`);
+        } else {
+          res.json({ fullText: out[locale], culpritName: out.culpritName });
+          return;
+        }
+      } catch (err) {
+        console.error(`${DEBUG_PREFIX} in-flight finale propagated error`, err);
+      }
+    }
+
+    /* ---- Fresh generation: bilingual JSON in a single LLM call ---- */
     const accusation = session.activeAccusation;
-    const playerNames = Array.from(session.players.values()).map((p) => p.name).join(', ');
-    let fullText = '';
-    try {
-      const finaleScenario = getScenarioForSession(session);
-      const finaleMaxTurns = finaleScenario?.maxTurns ?? 40;
-      for await (const chunk of streamFinale({
-        world: session.world,
+    const finaleScenario = getScenarioForSession(session);
+    const finaleMaxTurns = finaleScenario?.maxTurns ?? 40;
+    const generation = (async () => {
+      const bilingual = await generateBilingualFinale({
+        world: session.world!,
         outcome,
         accuserName: accusation?.proposerName,
-        accusedNpcId: outcome === 'won' ? session.world.solution.culpritNpcId : accusation?.suspectId,
+        accusedNpcId: outcome === 'won' ? session.world!.solution.culpritNpcId : accusation?.suspectId,
         wrongAccusedNpcId: outcome === 'lost_wrong' ? accusation?.suspectId : undefined,
-        evidencePresentedId: session.world.solution.keyEvidenceId,
+        evidencePresentedId: session.world!.solution.keyEvidenceId,
         worldStateLog: session.worldStateLog,
         turnCount: session.mpTurnCount,
         maxTurns: finaleMaxTurns,
-        locale,
-      })) {
-        fullText += chunk;
-        res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
-      }
-      const culpritName = session.world.npcs.find((n) => n.id === session.world!.solution.culpritNpcId)?.name || null;
-      res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, culpritName, players: playerNames })}\n\n`);
-      console.log(`[finale ${sessionId.slice(0, 8)}] ✓ stream done (${fullText.length} chars, culprit=${culpritName})`);
-      res.end();
-    } catch (err) {
-      console.error(`${DEBUG_PREFIX} finale stream error`, err);
-      try { res.end(); } catch { /* */ }
+      });
+      const cachePayload = { ...bilingual, outcome };
+      store.setFinaleText(sessionId, cachePayload);
+      return cachePayload;
+    })();
+    store.setInflightFinale(sessionId, generation);
+
+    try {
+      const out = await generation;
+      res.json({ fullText: out[locale], culpritName: out.culpritName });
+      console.log(
+        `[finale ${sessionId.slice(0, 8)}] ✓ bilingual cached (tr=${out.tr.length}c en=${out.en.length}c, culprit=${out.culpritName})`,
+      );
+    } finally {
+      store.clearInflightFinale(sessionId);
     }
   } catch (err) {
     console.error(`${DEBUG_PREFIX} finale error`, err);

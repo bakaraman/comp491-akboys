@@ -95,16 +95,21 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   const refreshSessionInfo = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/chat/session/${sessionId}`, {
-        headers: await getAuthHeaders(),
-      });
+      // #58: forward the player's locale so the server flattens scenarioMeta
+      // (NPC descriptions, room/item names, scenarioTitle) into the right
+      // language — otherwise an EN player sees Turkish NPC descriptions in
+      // AccuseModal and the GameMap.
+      const response = await fetch(
+        `${API_BASE}/api/chat/session/${sessionId}?locale=${locale}`,
+        { headers: await getAuthHeaders() },
+      );
       if (!response.ok) throw new Error();
       const data = await response.json();
       setSessionInfo(data);
     } catch {
       setFetchError(true);
     }
-  }, [sessionId]);
+  }, [sessionId, locale]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -243,7 +248,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         setIsJoining(false);
         if (!ok) {
           // Name might be taken in this session, show popup to pick a different one
-          setJoinError(mp.error || 'Name already taken, please choose another');
+          setJoinError(mp.error || T.game.nameTaken);
           setShowNamePopup(true);
         }
       });
@@ -253,7 +258,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }, [isMultiplayer, mp.isConnected, mp.myPlayerId, storedName, nameLoaded, autoJoinAttempted]);
 
-  /* ---- Spectator join (#52): connect to the socket room without joining as player ---- */
+  /* ---- Spectator join (#52): connect to the socket room without joining as player ----
+   *
+   * #58: forward the current locale so the server can flatten history's
+   * bilingual companion + scenarioTitle into the spectator's language.
+   */
   const spectatorJoinedRef = useRef(false);
   useEffect(() => {
     if (!isSpectator || !mp.isConnected || spectatorJoinedRef.current) return;
@@ -263,9 +272,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       const sock = getSocket();
       // spectator:join is not in ClientToServerEvents; escape type check safely
       (sock as unknown as { emit: (ev: string, data: unknown) => void })
-        .emit('spectator:join', { sessionId, role: 'spectator' });
+        .emit('spectator:join', { sessionId, role: 'spectator', locale });
     });
-  }, [isSpectator, mp.isConnected, sessionId]);
+  }, [isSpectator, mp.isConnected, sessionId, locale]);
   const [isStartingGame, setIsStartingGame] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commOpen, setCommOpen] = useState(false);
@@ -276,12 +285,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setStoredName(playerName);
     const ok = await mp.joinSession(playerName);
     if (!ok) {
-      setJoinError(mp.error || 'Failed to join');
+      setJoinError(mp.error || T.errors.generic);
     } else {
       setShowNamePopup(false);
     }
     setIsJoining(false);
-  }, [isJoining, mp, setStoredName]);
+  }, [isJoining, mp, setStoredName, T]);
 
   const handleStartGame = useCallback(async () => {
     if (isStartingGame) return;
@@ -291,10 +300,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }, [isStartingGame, mp]);
 
   const handleLeave = useCallback(() => {
-    if (!confirm('Are you sure you want to leave?')) return;
+    if (!confirm(T.game.confirmLeave)) return;
     disconnectSocket();
     window.location.href = '/';
-  }, []);
+  }, [T]);
 
   /* ---- Auto-scroll ---- */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -312,8 +321,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   if (fetchError) {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
-        <p style={{ color: '#6a6050', fontSize: '16px', marginBottom: '24px' }}>Session not found</p>
-        <a href="/" style={{ padding: '12px 32px', backgroundColor: '#d4a843', color: '#0a0a0a', borderRadius: '8px', textDecoration: 'none', fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Back to Home</a>
+        <p style={{ color: '#6a6050', fontSize: '16px', marginBottom: '24px' }}>{T.game.sessionNotFound}</p>
+        <a href="/" style={{ padding: '12px 32px', backgroundColor: '#d4a843', color: '#0a0a0a', borderRadius: '8px', textDecoration: 'none', fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>{T.game.backToHome}</a>
       </div>
     );
   }
@@ -326,7 +335,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '3px solid #2a2520', borderTopColor: '#d4a843', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
-          <p style={{ color: '#4a4540', fontStyle: 'italic' }}>Loading session...</p>
+          <p style={{ color: '#4a4540', fontStyle: 'italic' }}>{T.game.loadingSession}</p>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -352,13 +361,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             <>
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '3px solid #2a2520', borderTopColor: '#d4a843', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
               <p style={{ color: '#4a4540', fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>
-                Joining as {storedName}...
+                {T.game.joiningAs.replace('{name}', storedName ?? '')}
               </p>
             </>
           )}
           {!isJoining && !mp.isConnected && (
             <p style={{ color: '#4a4540', fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>
-              Connecting to server...
+              {T.game.connectingToServer}
             </p>
           )}
         </div>
@@ -429,7 +438,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               fontSize: '10px', fontFamily: 'monospace', letterSpacing: '1px',
               color: '#5a7a9a', border: '1px solid #2a4a6a', borderRadius: '4px',
               padding: '2px 7px', textTransform: 'uppercase',
-            }}>👁 İzleyici</span>
+            }}>{T.game.spectatorBadge}</span>
           )}
           {/* C.4: Turn counter badge — color shifts as turns run out */}
           {mp.turnInfo && (() => {
@@ -551,7 +560,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
               <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#4a4540', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
             </span>
-            {typingNames.length === 1 ? `${typingNames[0]} is typing...` : `${typingNames.join(' and ')} are typing...`}
+            {typingNames.length === 1
+              ? T.game.isTypingSingle.replace('{name}', typingNames[0])
+              : T.game.isTypingMultiple.replace('{names}', typingNames.join(', '))}
           </div>
         )}
         {(mp.actionQueue.waiting.length > 0 || mp.actionQueue.processingPlayerId) && (
@@ -564,7 +575,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#d4a843', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
               <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#d4a843', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
             </span>
-            The narrator contemplates...
+            {T.game.narratorContemplates}
           </div>
         )}
       </div>
@@ -581,10 +592,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {!isSpectator && <ChatInput onSend={mp.sendAction} onTypingChange={mp.sendTyping} playerName={myPlayer?.name} />}
+      {!isSpectator && (
+        <ChatInput
+          onSend={mp.sendAction}
+          onTypingChange={mp.sendTyping}
+          playerName={myPlayer?.name}
+          /* v3 input lock: block new submits until my last narrator:done
+           * arrives. Prevents the out-of-order narrator response bug where
+           * a fast follow-up resolved before the slow first action. */
+          disabled={mp.isMyActionPending}
+        />
+      )}
       {isSpectator && (
         <div style={{ padding: '10px 20px', borderTop: '1px solid #1a1a1a', textAlign: 'center', fontSize: '11px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>
-          👁 İzleyici modunda — sadece okuyabilirsiniz
+          {T.game.spectatorFooter}
         </div>
       )}
 
@@ -681,7 +702,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 70 }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '3px solid #2a2520', borderTopColor: '#d4a843', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
-            <p style={{ color: '#d4a843', fontSize: '14px', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>Reconnecting...</p>
+            <p style={{ color: '#d4a843', fontSize: '14px', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>{T.game.reconnecting}</p>
           </div>
         </div>
       )}
@@ -1016,7 +1037,9 @@ function QueueBanner({
                   fontWeight: isMe ? 'bold' : 'normal',
                 }}
               >
-                {isMe ? `SEN (#${myWaitIndex + (queue.processingPlayerId ? 2 : 1)})` : w.playerName}
+                {isMe
+                  ? `${T.game.queueYouBadge} (#${myWaitIndex + (queue.processingPlayerId ? 2 : 1)})`
+                  : w.playerName}
               </span>
             );
           })}

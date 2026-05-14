@@ -71,27 +71,52 @@ Player 3 ──Socket.IO──┘         │
 ### Multiplayer Action Flow:
 1. Player emits `player:action` with message
 2. Cooldown check (2s per player)
-3. Action enters `ActionBatcher` queue
+3. Action enters `ActionBatcher` queue. **Per-session in-flight lock**: a session's
+   batches are chained on a single Promise so no two batches can overlap. This
+   prevents a slow narrator call on action A from being passed by a fast
+   call on action B (which used to surface as out-of-order chat replies).
 4. Batcher waits: 1.5s (single action) / 4s (multi) / 6s max
 5. Timer fires → drain queue → process each action sequentially:
    a. `buildPlayerActionPrompt()` → system prompt with full world state
-   b. `narratorStructuredResponse()` → JSON `{ response, observed, directives }`
-   c. If JSON fails → `narratorChatStream()` + `parseLegacyTextResponse()`
+   b. `narratorStructuredResponse()` → bilingual JSON `{ response: {tr,en}, observed: {tr,en}, directives }`
+   c. If JSON fails → one retry, then `narratorChatStream()` + `parseLegacyTextResponse()`
    d. Validate each directive against canonical state
-   e. Apply valid directives (update rooms, inventory, object states)
-   f. Send `narrator:chunk` + `narrator:done` → ONLY to actor
-   g. Send `narrator:observed` → ONLY to same-room witnesses
-   h. Generate suggestions → ONLY to actor
+   e. Apply valid directives (currently only MOVE — others are narrative-only post Velvet Shadow v2)
+   f. Send `narrator:chunk` + `narrator:done` → **ONLY to the acting player's sockets** (flattened to their locale)
+   g. The actor's typed action message is stored with `visibleTo: [actor]` so witnesses **never** see another player's prompt in their chat
+   h. Generate bilingual suggestions → ONLY to actor (flattened to their locale)
 
-### Visibility Model:
+### Visibility Model (Velvet Shadow v3 — chat isolation):
+
+**One shared story, isolated chats.** Every player still plays the same world
+(same rooms, same NPCs, same culprit, same accusation flow). World state
+mutations (MOVE, NPC moves logged in `worldStateLog`) remain shared so a
+player's action still affects other players' next narrator beat. What's
+isolated is the **chat surface**: nobody sees another player's typed prompt
+or narrator reply.
+
 | Message Type | Who Sees It |
 |-------------|-------------|
-| Opening narration | Everyone |
-| Player's own action | Only that player |
-| Narrator private response | Only the actor |
-| Narrator observed response | Same-room players (not the actor) |
-| Room comm | All players in sender's room |
-| Direct comm | Sender + target only |
+| Opening narration | Everyone (each renders pickLang(field, locale)) |
+| Player's own typed action | **Only that player's chat** (v3 change) |
+| Narrator response (private) | **Only the actor** — second-person prose in their locale |
+| Room comm (Evidence Board) | All connected players (single shared notepad — opt-in collaboration) |
+| Direct comm | Wire kept for compatibility, behaves like room comm |
+| Action queue indicator (`session:queue`) | Everyone in session — shows who's waiting, no message content |
+| Typing indicator (`player:typing-update`) | Everyone in session — shows who's mid-type, no content |
+| Accusation vote banner | Everyone in session |
+| Spectator (#52) | Read-only history flattened to spectator's locale (chat content is still actor-scoped — spectator effectively sees the union since `visibleTo` enforcement does not apply) |
+
+**Why chat isolation (v3, 2026-05-14):**
+- Bilingual flatten on a witness's locale made the actor's second-person prose
+  ("sen / you") look like it was addressed to the witness — confusing.
+- Players were also reading each other's prompts and feeling "spoiled" before
+  exploring themselves. The product feels stronger when every player runs
+  their own investigation in the same world.
+- World coupling is preserved through `worldStateLog` and MOVE directives, so
+  another player's action still surfaces in your narrator's next reply ("the
+  necklace is gone, somebody must have taken it") — just not as a literal
+  chat line.
 
 ---
 

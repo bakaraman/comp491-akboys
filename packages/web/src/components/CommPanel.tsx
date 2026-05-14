@@ -164,7 +164,7 @@ export function CommPanel({
                   marginBottom: '3px',
                   letterSpacing: '0.5px',
                 }}>
-                  {isMe ? 'Sen' : m.senderName}
+                  {isMe ? T.game.youCommLabel : m.senderName}
                 </div>
 
                 {/* Bubble */}

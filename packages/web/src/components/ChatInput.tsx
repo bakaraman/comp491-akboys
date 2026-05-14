@@ -61,7 +61,7 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
   }
 
   const placeholder = disabled
-    ? T.game.narratorWriting
+    ? T.game.chatInputBlocked
     : playerName
       ? T.game.sendPlaceholderNamed.replace('{name}', playerName)
       : T.game.sendPlaceholder;

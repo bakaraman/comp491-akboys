@@ -192,15 +192,43 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
     setStatus('connecting');
     const socket = getSocket();
 
-    /* -- request mic + start mesh -- */
+    /* -- request mic + start mesh --
+     *
+     * A previous device id may live in localStorage but the device itself
+     * could be gone (unplugged USB mic, different machine, permission
+     * reset). With `deviceId: { exact: ... }` the browser throws
+     * OverconstrainedError instead of falling back to default. We catch
+     * that explicitly and retry once with a relaxed constraint, then
+     * clear the stale selectedInputId so subsequent boots don't repeat
+     * the same dance.
+     */
+    async function acquireStream(): Promise<MediaStream> {
+      const preferred: MediaStreamConstraints = {
+        audio: selectedInputId
+          ? { deviceId: { exact: selectedInputId }, echoCancellation: true, noiseSuppression: true }
+          : { echoCancellation: true, noiseSuppression: true },
+      };
+      try {
+        return await navigator.mediaDevices.getUserMedia(preferred);
+      } catch (err) {
+        const error = err as Error;
+        if (selectedInputId && error.name === 'OverconstrainedError') {
+          console.warn(
+            `${DEBUG} OverconstrainedError for deviceId=${selectedInputId.slice(0, 8)} — falling back to default device`,
+          );
+          // Clear the stale selection so the next session doesn't trip again.
+          setSelectedInputId(null);
+          return navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          });
+        }
+        throw err;
+      }
+    }
+
     async function init() {
       try {
-        const constraints: MediaStreamConstraints = {
-          audio: selectedInputId
-            ? { deviceId: { exact: selectedInputId }, echoCancellation: true, noiseSuppression: true }
-            : { echoCancellation: true, noiseSuppression: true },
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await acquireStream();
         if (cancelRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;

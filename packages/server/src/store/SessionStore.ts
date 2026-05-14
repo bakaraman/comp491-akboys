@@ -114,6 +114,19 @@ export interface SessionData {
    */
   reconstruction: ReconstructionDTO | null;
 
+  /**
+   * #58 follow-up: cached bilingual finale text. Generated lazily on the
+   * first `/api/chat/finale` request and reused for every subsequent call
+   * (other client, spectator, refresh). Without this, each client triggered
+   * a separate OpenAI stream and one player could wait 40s while another
+   * got their finale in 5s.
+   *
+   * Tied to `outcome` so re-accusing in a future session-id replay can't
+   * accidentally hit a stale cache (in practice we never reset outcome
+   * within a session — the field is just defensive).
+   */
+  finaleText: { tr: string; en: string; culpritName: string | null; outcome: string } | null;
+
   /** Genre detected from hostPrompt at world-generation time (Issue #2). */
   detectedGenre?: string;
 }
@@ -165,6 +178,22 @@ export interface SessionStore {
   getInflightReconstruction(sessionId: string): Promise<ReconstructionDTO> | undefined;
   setInflightReconstruction(sessionId: string, promise: Promise<ReconstructionDTO>): void;
   clearInflightReconstruction(sessionId: string): void;
+
+  /** #58 follow-up: cache the bilingual finale once both languages are generated. */
+  setFinaleText(
+    sessionId: string,
+    text: { tr: string; en: string; culpritName: string | null; outcome: string },
+  ): void;
+
+  /** Single-flight for the bilingual finale call (same pattern as reconstruction). */
+  getInflightFinale(
+    sessionId: string,
+  ): Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }> | undefined;
+  setInflightFinale(
+    sessionId: string,
+    promise: Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }>,
+  ): void;
+  clearInflightFinale(sessionId: string): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -201,6 +230,11 @@ export class MemorySessionStore implements SessionStore {
    * each firing their own LLM call. Process-local; not persisted.
    */
   protected inflightReconstructions: Map<string, Promise<ReconstructionDTO>> = new Map();
+  /** #58 follow-up: single-flight registry for the bilingual finale call. */
+  protected inflightFinales: Map<
+    string,
+    Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }>
+  > = new Map();
   private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
 
@@ -250,6 +284,7 @@ export class MemorySessionStore implements SessionStore {
       npcPortraits: {},
       openingReady: false,
       reconstruction: null,
+      finaleText: null,
     };
 
     this.sessions.set(session.id, session);
@@ -499,6 +534,33 @@ export class MemorySessionStore implements SessionStore {
   clearInflightReconstruction(sessionId: string): void {
     this.inflightReconstructions.delete(sessionId);
   }
+
+  setFinaleText(
+    sessionId: string,
+    text: { tr: string; en: string; culpritName: string | null; outcome: string },
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.finaleText = text;
+    session.lastActivityAt = Date.now();
+  }
+
+  getInflightFinale(
+    sessionId: string,
+  ): Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }> | undefined {
+    return this.inflightFinales.get(sessionId);
+  }
+
+  setInflightFinale(
+    sessionId: string,
+    promise: Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }>,
+  ): void {
+    this.inflightFinales.set(sessionId, promise);
+  }
+
+  clearInflightFinale(sessionId: string): void {
+    this.inflightFinales.delete(sessionId);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -568,6 +630,8 @@ interface StoredSessionData {
   npcPortraits?: Record<string, string | null>;
   openingReady?: boolean;
   reconstruction?: ReconstructionDTO | null;
+  /** #58 follow-up: cached bilingual finale text. Persists across server restarts in Firestore. */
+  finaleText?: { tr: string; en: string; culpritName: string | null; outcome: string } | null;
 }
 
 function serializeSession(session: SessionData): StoredSessionData {
@@ -613,6 +677,7 @@ function serializeSession(session: SessionData): StoredSessionData {
     npcPortraits: session.npcPortraits,
     openingReady: session.openingReady,
     reconstruction: session.reconstruction,
+    finaleText: session.finaleText,
   };
 }
 
@@ -675,6 +740,7 @@ function deserializeSession(data: StoredSessionData): SessionData {
     npcPortraits: data.npcPortraits ?? {},
     openingReady: data.openingReady ?? false,
     reconstruction: data.reconstruction ?? null,
+    finaleText: data.finaleText ?? null,
   };
 }
 
@@ -808,6 +874,14 @@ export class FirestoreSessionStore extends MemorySessionStore {
 
   override setReconstruction(sessionId: string, data: ReconstructionDTO): void {
     super.setReconstruction(sessionId, data);
+    void this.sync(sessionId);
+  }
+
+  override setFinaleText(
+    sessionId: string,
+    text: { tr: string; en: string; culpritName: string | null; outcome: string },
+  ): void {
+    super.setFinaleText(sessionId, text);
     void this.sync(sessionId);
   }
 }

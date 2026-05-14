@@ -382,7 +382,9 @@ export function LobbyScreen({
               }}
             >
               {generationInFlight
-                ? storyStatus?.message || T.lobby.generating
+                /* #58: server now emits phase-only; render the locale-aware
+                 * label so EN clients no longer see Turkish "Hikaye yazılıyor". */
+                ? T.lobby.generating
                 : T.lobby.waitingForHost}
             </div>
             {generationInFlight && (

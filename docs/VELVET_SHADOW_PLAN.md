@@ -94,10 +94,14 @@ Worker aksiyonu işler:
     │    { privateResponse, directives }
     │    (observed field yok — aynı oda tam mesajı görüyor)
     │
-    ├─ Cevap stream'lenir:
-    │    - Actor'a: tam cevap
-    │    - Aynı odadakilere: tam cevap (observed özet kalktı)
-    │    - Farklı odadakiler: görmez
+    ├─ Cevap stream'lenir (v3 chat isolation, 2026-05-14):
+    │    - Actor'a: kendi typed action mesajı + narrator yanıtı (kendi locale'inde)
+    │    - Aynı oda dahil DİĞER oyuncular: actor'ın typed mesajını ve
+    │       narrator yanıtını chat'te görmez. Kuyruk/typing indicator hâlâ
+    │       görünür ama içerik aktarılmaz.
+    │    - Dünya state'i (MOVE, NPC moves, worldStateLog) hâlâ ortak →
+    │       diğer oyuncuların bir sonraki narrator beat'i actor'ın
+    │       etkilerini doğal cümlelerle yedirir ("kolye yerde yok").
     │
     ├─ Directives uygulanır:
     │    - MOVE: oyuncu yer değiştirir
@@ -126,7 +130,7 @@ Queue'da sıradaki aksiyon (varsa)
 | 8 | Katil belirsizliği | Tüm NPC'ler şüpheli, sadece 1'inin gerçek zinciri |
 | 9 | Aksiyon queue | Global FIFO, tüm history context |
 | 10 | Send butonu | AI cevap bitene kadar disabled |
-| 11 | Aynı oda visibility | Tam mesaj + AI cevabı paylaşılır (observed özet kalktı) |
+| 11 | Chat visibility (v3, 2026-05-14) | **Tam chat izolasyonu.** Hiçbir oyuncu başkasının typed mesajını veya başkasına gelen narrator yanıtını chat'inde görmez (aynı odada olsalar bile). Kuyruk, typing indicator, accuse banner, evidence board hâlâ ortak. Dünya state'i (MOVE, NPC, item) ortak — narrator komşu beat'lerde diğer oyuncunun etkilerini yedirir. |
 | 12 | Suçlama oy eşiği | Oybirliği (N/N) |
 | 13 | Yanlış suçlama | Anında kayıp, tek atış |
 | 14 | Finale | Canlı AI üretimi, oyun sonu |
