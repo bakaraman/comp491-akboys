@@ -375,7 +375,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       let observedLine: string;
       let directives: ReturnType<typeof parseStructuredResponse>['directives'];
 
-      const structuredResult = await narratorStructuredResponse(systemPrompt, session.history);
+      const structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
 
       if (structuredResult) {
         // Structured path succeeded — parse with schema validation
@@ -400,7 +400,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         let fullText = '';
 
         try {
-          for await (const chunk of narratorChatStream(systemPrompt, session.history)) {
+          for await (const chunk of narratorChatStream(systemPrompt, session.history, sessionId)) {
             fullText += chunk;
             for (const sid of streamFanoutSockets) {
               io.to(sid).emit('narrator:chunk', {
@@ -495,7 +495,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const sceneCtx = buildSceneContext(scenario, session, actorRoomId);
       let suggestions: string[];
       try {
-        suggestions = await suggestFollowUps(privateResponse, sceneCtx);
+        suggestions = await suggestFollowUps(privateResponse, sceneCtx, sessionId);
       } catch {
         // Use the scene-aware fallback rather than scattered hardcoded tuples.
         suggestions = buildContextFallbacks(sceneCtx);
@@ -1058,7 +1058,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         const playerCount = session.players.size;
 
         const tWorldStart = Date.now();
-        const result = await generateWorld({ hostPrompt, playerCount });
+        const result = await generateWorld({ hostPrompt, playerCount, sessionId });
         const worldMs = Date.now() - tWorldStart;
         store.setWorld(sessionId, result.world);
         console.log(`[story ${sid}] ✓ world ready (${worldMs}ms) title="${result.world.meta.title}" rooms=${result.world.rooms.length} npcs=${result.world.npcs.length} items=${result.world.items.length} fallback=${result.usedFallback} genre=${result.genreTag}`);

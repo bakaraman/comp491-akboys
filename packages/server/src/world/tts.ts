@@ -9,13 +9,10 @@
  * @since 2026-04-17
  */
 
-import OpenAI from 'openai';
+import { openaiClient } from '../lib/openai-client.js';
+import { withOpenAIRetry } from '../lib/openai-retry.js';
+import { logOpenAIUsage } from '../lib/usage-logger.js';
 
-let _client: OpenAI | null = null;
-function client(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
-}
 const DEBUG = '[tts]';
 
 /**
@@ -53,6 +50,7 @@ export interface TtsOptions {
   voice?: TtsVoice;
   format?: 'wav' | 'mp3' | 'opus' | 'pcm';
   instructions?: string;
+  sessionId?: string;
 }
 
 /**
@@ -62,23 +60,50 @@ export async function streamTts(opts: TtsOptions): Promise<Response> {
   const voice = opts.voice ?? 'ash';
   const format = opts.format ?? 'mp3';
   const instructions = opts.instructions ?? DEFAULT_INSTRUCTIONS;
+  const text = opts.text.slice(0, 4000);
   const t0 = Date.now();
 
   console.log(`${DEBUG} ▶ voice=${voice} format=${format} chars=${opts.text.length}`);
 
-  // Some OpenAI SDK versions haven't added `ash`/`ballad`/`fable`/`verse` to the
-  // union type yet, but the API accepts them. Cast to string to bypass the
-  // stale type check.
-  const response = await client().audio.speech.create({
-    model: 'gpt-4o-mini-tts',
-    voice: voice as 'shimmer',
-    input: opts.text.slice(0, 4000),
-    instructions,
-    response_format: format,
-  });
+  try {
+    // Some OpenAI SDK versions haven't added `ash`/`ballad`/`fable`/`verse` to the
+    // union type yet, but the API accepts them. Cast to string to bypass the
+    // stale type check.
+    const response = await withOpenAIRetry('tts', () =>
+      openaiClient().audio.speech.create({
+        model: 'gpt-4o-mini-tts',
+        voice: voice as 'shimmer',
+        input: text,
+        instructions,
+        response_format: format,
+      }),
+    );
 
-  console.log(`${DEBUG} ✓ (${Date.now() - t0}ms)`);
-  return response as unknown as Response;
+    console.log(`${DEBUG} ✓ (${Date.now() - t0}ms)`);
+    // TTS pricing is per-character; use inputTokens as char count for the cost calc.
+    logOpenAIUsage({
+      model: 'gpt-4o-mini-tts',
+      purpose: 'tts',
+      inputTokens: text.length,
+      outputTokens: 0,
+      durationMs: Date.now() - t0,
+      sessionId: opts.sessionId,
+      success: true,
+    });
+    return response as unknown as Response;
+  } catch (err) {
+    logOpenAIUsage({
+      model: 'gpt-4o-mini-tts',
+      purpose: 'tts',
+      inputTokens: text.length,
+      outputTokens: 0,
+      durationMs: Date.now() - t0,
+      sessionId: opts.sessionId,
+      success: false,
+      errorTag: (err as Error).name ?? 'error',
+    });
+    throw err;
+  }
 }
 
 /** Buffer TTS to a full ArrayBuffer (for simpler client playback). */

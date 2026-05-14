@@ -10,16 +10,13 @@
  * @since 2026-04-17
  */
 
-import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
 import { WorldSchema, type WorldData, getFallbackWorld } from '@akboys/shared';
 import { detectGenre, getStyleGuide, type GenreTag } from './genre-style.js';
+import { openaiClient } from '../lib/openai-client.js';
+import { withOpenAIRetry } from '../lib/openai-retry.js';
+import { logFromCompletion } from '../lib/usage-logger.js';
 
-let _client: OpenAI | null = null;
-function client(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
-}
 const MODEL = 'gpt-5.4';
 // Per OpenAI docs, gpt-5.4 defaults to 'none' reasoning. Lowest latency for
 // this extraction-style task. SDK type union doesn't include 'none' yet, so
@@ -207,6 +204,7 @@ export function validateWorld(world: WorldData, expectedPlayerCount: number): Va
 export interface GenerateWorldOptions {
   hostPrompt: string;
   playerCount: number;
+  sessionId?: string;
 }
 
 export interface GenerateWorldResult {
@@ -220,20 +218,30 @@ export interface GenerateWorldResult {
 async function callOpenAIOnce(
   systemPrompt: string,
   userPrompt: string,
+  sessionId?: string,
 ): Promise<WorldData> {
   const t0 = Date.now();
   console.log(`${DEBUG} OpenAI call ▶ model=${MODEL} promptLen=${systemPrompt.length + userPrompt.length}`);
-  const completion = await client().beta.chat.completions.parse({
-    model: MODEL,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: zodResponseFormat(WorldSchema, 'noir_world'),
-    max_completion_tokens: MAX_TOKENS,
-    reasoning_effort: REASONING_EFFORT as 'low',
-  });
+  const completion = await withOpenAIRetry('worldgen', () =>
+    openaiClient().beta.chat.completions.parse({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: zodResponseFormat(WorldSchema, 'noir_world'),
+      max_completion_tokens: MAX_TOKENS,
+      reasoning_effort: REASONING_EFFORT as 'low',
+    }),
+  );
   console.log(`${DEBUG} OpenAI call ✓ (${Date.now() - t0}ms)`);
+  logFromCompletion(completion, {
+    model: MODEL,
+    purpose: 'worldgen',
+    durationMs: Date.now() - t0,
+    sessionId,
+    success: true,
+  });
 
   const msg = completion.choices[0].message;
   if (msg.refusal) {
@@ -303,7 +311,7 @@ function normalizeWorld(world: WorldData): WorldData {
 export async function generateWorld(
   opts: GenerateWorldOptions,
 ): Promise<GenerateWorldResult> {
-  const { hostPrompt, playerCount } = opts;
+  const { hostPrompt, playerCount, sessionId } = opts;
   const clampedPC = Math.min(Math.max(playerCount, 2), 10);
 
   // Detect genre (keyword heuristic → LLM fallback if ambiguous)
@@ -319,7 +327,7 @@ export async function generateWorld(
   try {
     attempts += 1;
     console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, genre=${genreTag}, prompt=${hostPrompt.slice(0, 60)}`);
-    const world = await callOpenAIOnce(systemPrompt, userPrompt);
+    const world = await callOpenAIOnce(systemPrompt, userPrompt, sessionId);
     const validation = validateWorld(world, clampedPC);
     if (validation.valid) {
       console.log(`${DEBUG} attempt 1: success`);
@@ -331,7 +339,7 @@ export async function generateWorld(
     attempts += 1;
     const repairUserPrompt = `${userPrompt}\n\nYour previous attempt had these validation errors:\n${validation.errors.map((e) => `- ${e}`).join('\n')}\n\nFix them and return a corrected world. Keep everything else consistent.`;
     console.log(`${DEBUG} attempt 2: repair with feedback`);
-    const repaired = await callOpenAIOnce(systemPrompt, repairUserPrompt);
+    const repaired = await callOpenAIOnce(systemPrompt, repairUserPrompt, sessionId);
     const validation2 = validateWorld(repaired, clampedPC);
     if (validation2.valid) {
       console.log(`${DEBUG} attempt 2: success`);

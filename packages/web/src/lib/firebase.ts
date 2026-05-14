@@ -10,7 +10,7 @@
 
 'use client';
 
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -19,6 +19,7 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -30,17 +31,37 @@ const firebaseConfig = {
 };
 
 let authInstance: ReturnType<typeof getAuth> | null = null;
+let firestoreInstance: Firestore | null = null;
 
 function isAuthEnabled(): boolean {
   return process.env.NEXT_PUBLIC_FIREBASE_AUTH_ENABLED === 'true';
 }
 
+function hasFirebaseConfig(): boolean {
+  return !!firebaseConfig.projectId && !!firebaseConfig.apiKey;
+}
+
+function getFirebaseApp(): FirebaseApp | null {
+  if (!hasFirebaseConfig()) return null;
+  return getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+}
+
 function ensureAuth() {
   if (!isAuthEnabled()) return null;
   if (authInstance) return authInstance;
-  const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+  const app = getFirebaseApp();
+  if (!app) return null;
   authInstance = getAuth(app);
   return authInstance;
+}
+
+/** Lazy Firestore client. Returns null when Firebase config is missing. */
+export function getFirestoreClient(): Firestore | null {
+  if (firestoreInstance) return firestoreInstance;
+  const app = getFirebaseApp();
+  if (!app) return null;
+  firestoreInstance = getFirestore(app);
+  return firestoreInstance;
 }
 
 export const auth = ensureAuth();

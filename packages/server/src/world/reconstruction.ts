@@ -26,22 +26,18 @@
  * @since 2026-05-06
  */
 
-import OpenAI from 'openai';
 import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
 import type { WorldData, ReconstructionDTO, ReconstructionEvent } from '@akboys/shared';
+import { openaiClient } from '../lib/openai-client.js';
+import { withOpenAIRetry } from '../lib/openai-retry.js';
+import { logFromCompletion } from '../lib/usage-logger.js';
 
 const DEBUG = '[reconstruction]';
 const EVENTS_MODEL = 'gpt-5-nano';
 const EVENTS_MAX_TOKENS = 6000;
 const CONCLUSION_MODEL = 'gpt-4o-mini';
 const CONCLUSION_MAX_TOKENS = 500;
-
-let _client: OpenAI | null = null;
-function client(): OpenAI {
-  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return _client;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Pass-1 schema: events only (no conclusion).                       */
@@ -213,6 +209,7 @@ function buildScrubber(world: WorldData): (text: string) => string {
 async function generateConclusionText(
   world: WorldData,
   events: ReconstructionEvent[],
+  sessionId?: string,
 ): Promise<string> {
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
@@ -244,14 +241,25 @@ ${eventsBlock}
 
 Şimdi yukarıdaki gerçeği özetleyen 3-4 cümlelik kapanış paragrafı yaz. Cümleyi yarıda bırakma.`;
 
-  const completion = await client().chat.completions.create({
+  const t0 = Date.now();
+  const completion = await withOpenAIRetry('reconstruction-conclusion', () =>
+    openaiClient().chat.completions.create({
+      model: CONCLUSION_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_tokens: CONCLUSION_MAX_TOKENS,
+      temperature: 0.55,
+    }),
+  );
+
+  logFromCompletion(completion, {
     model: CONCLUSION_MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    max_tokens: CONCLUSION_MAX_TOKENS,
-    temperature: 0.55,
+    purpose: 'reconstruction-conclusion',
+    durationMs: Date.now() - t0,
+    sessionId,
+    success: true,
   });
 
   const choice = completion.choices[0];
@@ -286,6 +294,7 @@ function fallbackConclusion(world: WorldData): string {
 export async function generateReconstruction(
   world: WorldData,
   worldStateLog: string[],
+  sessionId?: string,
 ): Promise<ReconstructionDTO> {
   const t0 = Date.now();
   console.log(`${DEBUG} ▶ generating (${world.rooms.length} rooms, ${world.npcs.length} npcs, ${worldStateLog.length} log entries)`);
@@ -294,15 +303,25 @@ export async function generateReconstruction(
   const { system, user } = buildEventsPrompt(world, worldStateLog);
   const schema = buildEventsSchema(world);
 
-  const completion = await client().chat.completions.create({
+  const passT0 = Date.now();
+  const completion = await withOpenAIRetry('reconstruction-events', () =>
+    openaiClient().chat.completions.create({
+      model: EVENTS_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_completion_tokens: EVENTS_MAX_TOKENS,
+      reasoning_effort: 'minimal' as 'low',
+      response_format: zodResponseFormat(schema, 'crime_reconstruction_events'),
+    }),
+  );
+  logFromCompletion(completion, {
     model: EVENTS_MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    max_completion_tokens: EVENTS_MAX_TOKENS,
-    reasoning_effort: 'minimal' as 'low',
-    response_format: zodResponseFormat(schema, 'crime_reconstruction_events'),
+    purpose: 'reconstruction-events',
+    durationMs: Date.now() - passT0,
+    sessionId,
+    success: true,
   });
 
   const choice = completion.choices[0];
@@ -335,7 +354,7 @@ export async function generateReconstruction(
   /* ---- Pass 2: conclusion (plain text, gpt-4o-mini) ---- */
   let conclusion: string;
   try {
-    const raw2 = await generateConclusionText(world, events);
+    const raw2 = await generateConclusionText(world, events, sessionId);
     conclusion = scrub(raw2);
     // Sanity: terminator check. With gpt-4o-mini + 500 tokens this should
     // basically never trigger — but if a network blip cuts the response,
