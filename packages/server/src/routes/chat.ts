@@ -39,6 +39,7 @@ import {
   generateReconstruction,
   type FinaleOutcome,
 } from '../world/index.js';
+import { renderCaseFilePdf } from '../pdf/render.js';
 
 export const chatRouter = Router();
 
@@ -766,6 +767,112 @@ chatRouter.post('/reconstruction', requireAuth, async (req: Request, res: Respon
     if (!res.headersSent) res.status(500).json({ error: 'Reconstruction failed' });
   }
 });
+
+/* ================================================================== */
+/*  POST /api/chat/case-file — Issue #59                               */
+/*  Premium bilingual PDF case file. Lazy-rendered after the game     */
+/*  ends; per-locale single-flight cache so a second click (or a      */
+/*  parallel TR + EN request) doesn't re-burn the render pipeline.    */
+/* ================================================================== */
+chatRouter.post('/case-file', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { sessionId, locale: localeRaw } = req.body as { sessionId?: string; locale?: 'tr' | 'en' };
+    const locale: 'tr' | 'en' = localeRaw === 'en' ? 'en' : 'tr';
+    if (!sessionId) { res.status(400).json({ error: 'sessionId is required' }); return; }
+
+    const session = store.get(sessionId);
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
+    if (!session.world) { res.status(400).json({ error: 'No world for this session' }); return; }
+    if (session.state !== 'ended') {
+      res.status(403).json({ error: 'Case file is only available for ended sessions' });
+      return;
+    }
+
+    /* ---- Cache hit ---- */
+    const cached = session.caseFilePdf[locale];
+    if (cached) {
+      console.log(`[case-file ${sessionId.slice(0, 8)}] ✓ cache hit (${cached.length}b, locale=${locale})`);
+      sendPdf(res, cached, session, locale);
+      return;
+    }
+
+    /* ---- Single-flight ---- */
+    const inflight = store.getInflightCaseFile(sessionId, locale);
+    if (inflight) {
+      console.log(`[case-file ${sessionId.slice(0, 8)}] ⇢ awaiting in-flight render (locale=${locale})`);
+      try {
+        const buf = await inflight;
+        sendPdf(res, buf, session, locale);
+        return;
+      } catch (err) {
+        console.error(`${DEBUG_PREFIX} in-flight case-file propagated error`, err);
+        // fall through to fresh render
+      }
+    }
+
+    /* ---- Ensure reconstruction is cached (the PDF reuses it as the timeline). */
+    let reconstruction = session.reconstruction;
+    if (!reconstruction) {
+      const reconInflight = store.getInflightReconstruction(sessionId);
+      if (reconInflight) {
+        reconstruction = await reconInflight;
+      } else {
+        const reconGen = (async () => {
+          const dto = await generateReconstruction(session.world!, session.worldStateLog);
+          store.setReconstruction(sessionId, dto);
+          return dto;
+        })();
+        store.setInflightReconstruction(sessionId, reconGen);
+        try {
+          reconstruction = await reconGen;
+        } finally {
+          store.clearInflightReconstruction(sessionId);
+        }
+      }
+    }
+    if (!reconstruction) {
+      res.status(500).json({ error: 'Reconstruction unavailable' });
+      return;
+    }
+
+    /* ---- Fresh PDF render ---- */
+    const renderPromise = (async () => {
+      const buf = await renderCaseFilePdf({
+        session,
+        world: session.world!,
+        reconstruction: reconstruction!,
+        locale,
+      });
+      store.setCaseFilePdf(sessionId, locale, buf);
+      return buf;
+    })();
+    store.setInflightCaseFile(sessionId, locale, renderPromise);
+
+    try {
+      const buf = await renderPromise;
+      sendPdf(res, buf, session, locale);
+    } finally {
+      store.clearInflightCaseFile(sessionId, locale);
+    }
+  } catch (err) {
+    console.error(`${DEBUG_PREFIX} case-file error`, err);
+    if (!res.headersSent) res.status(500).json({ error: 'PDF render failed' });
+  }
+});
+
+function sendPdf(
+  res: Response,
+  buf: Buffer,
+  session: { id: string },
+  locale: 'tr' | 'en',
+): void {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Content-Length', String(buf.length));
+  const filename = `velvet-shadow-${session.id.slice(0, 8)}-${locale}.pdf`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.end(buf);
+}
 
 /* ================================================================== */
 /*  GET /api/chat/replay/:sessionId — Issue #52                        */

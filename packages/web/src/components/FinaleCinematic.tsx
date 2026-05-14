@@ -47,6 +47,9 @@ export function FinaleCinematic({
   const [culpritName, setCulpritName] = useState<string | null>(null);
   /* A.3: post-finale crime-scene reconstruction modal */
   const [reconstructionOpen, setReconstructionOpen] = useState(false);
+  /* #59: case-file PDF download state */
+  const [caseFileLoading, setCaseFileLoading] = useState(false);
+  const [caseFileError, setCaseFileError] = useState<string | null>(null);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const ttsRef = useRef<HTMLAudioElement | null>(null);
   const ttsStartedRef = useRef(false);
@@ -340,6 +343,51 @@ export function FinaleCinematic({
             >
               {T.reconstruction.cta}
             </button>
+            {/* #59: Premium case-file PDF download. */}
+            <button
+              onClick={async () => {
+                if (caseFileLoading) return;
+                setCaseFileLoading(true);
+                setCaseFileError(null);
+                try {
+                  const headers = await getAuthHeaders();
+                  const res = await fetch(`${API_BASE}/api/chat/case-file`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...headers },
+                    body: JSON.stringify({ sessionId, locale }),
+                  });
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `velvet-shadow-${sessionId.slice(0, 8)}-${locale}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } catch (err) {
+                  console.error(`${DEBUG} case-file download failed`, err);
+                  setCaseFileError(T.caseFile.failed);
+                } finally {
+                  setCaseFileLoading(false);
+                }
+              }}
+              disabled={caseFileLoading}
+              style={{
+                padding: '14px 24px',
+                backgroundColor: caseFileLoading ? '#2a2010' : '#15110a',
+                border: '1px solid #c8894a',
+                borderRadius: '8px',
+                color: caseFileLoading ? '#7a6a50' : '#c8894a',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                letterSpacing: '1px',
+                cursor: caseFileLoading ? 'wait' : 'pointer',
+              }}
+            >
+              {caseFileLoading ? T.caseFile.preparing : T.caseFile.download}
+            </button>
             <button
               onClick={onHome}
               style={{
@@ -372,6 +420,11 @@ export function FinaleCinematic({
               {T.finale.playAgain}
             </button>
           </div>
+        )}
+        {caseFileError && (
+          <p style={{ marginTop: '14px', fontSize: '12px', color: '#cf5b5b', fontFamily: 'monospace' }}>
+            {caseFileError}
+          </p>
         )}
 
         {!streamDone && !ttsStarted && (

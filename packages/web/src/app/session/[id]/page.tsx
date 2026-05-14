@@ -580,15 +580,48 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         )}
       </div>
 
-      {/* Hide chat input and suggestions for spectators (#52) */}
+      {/* Hide chat input and suggestions for spectators (#52).
+       *
+       * v3 follow-up: suggestion buttons share the same input lock as
+       * ChatInput. While my action is still pending (queued + narrator
+       * not yet resolved), tapping a suggestion would stack a second
+       * action, bypassing the disabled input. Mirror the disabled
+       * state here so the lock is honored from both surfaces. */}
       {!isSpectator && mp.suggestions.length > 0 && !mp.isNarratorStreaming && (
         <div style={{ display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a' }}>
-          {mp.suggestions.map((s, i) => (
-            <button key={i} onClick={() => mp.sendAction(s)} style={{ padding: '8px 16px', backgroundColor: 'transparent', border: '1px solid #2a2520', borderRadius: '20px', color: '#b0a080', fontSize: '13px', fontFamily: 'Georgia, serif', fontStyle: 'italic', cursor: 'pointer', transition: 'all 0.2s' }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#d4a843'; e.currentTarget.style.color = '#d4a843'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2a2520'; e.currentTarget.style.color = '#b0a080'; }}
-            >{s}</button>
-          ))}
+          {mp.suggestions.map((s, i) => {
+            const locked = mp.isMyActionPending;
+            return (
+              <button
+                key={i}
+                disabled={locked}
+                onClick={() => { if (!locked) mp.sendAction(s); }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #2a2520',
+                  borderRadius: '20px',
+                  color: locked ? '#3a3530' : '#b0a080',
+                  fontSize: '13px',
+                  fontFamily: 'Georgia, serif',
+                  fontStyle: 'italic',
+                  cursor: locked ? 'not-allowed' : 'pointer',
+                  opacity: locked ? 0.45 : 1,
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  if (locked) return;
+                  e.currentTarget.style.borderColor = '#d4a843';
+                  e.currentTarget.style.color = '#d4a843';
+                }}
+                onMouseLeave={(e) => {
+                  if (locked) return;
+                  e.currentTarget.style.borderColor = '#2a2520';
+                  e.currentTarget.style.color = '#b0a080';
+                }}
+              >{s}</button>
+            );
+          })}
         </div>
       )}
 

@@ -127,6 +127,14 @@ export interface SessionData {
    */
   finaleText: { tr: string; en: string; culpritName: string | null; outcome: string } | null;
 
+  /**
+   * #59: cached case-file PDF buffers, keyed by locale.
+   * In-memory only — NOT serialised to Firestore (binary blobs balloon
+   * doc size and we already have everything needed to regenerate on demand).
+   * Same single-flight pattern as reconstruction + finale.
+   */
+  caseFilePdf: { tr?: Buffer; en?: Buffer };
+
   /** Genre detected from hostPrompt at world-generation time (Issue #2). */
   detectedGenre?: string;
 }
@@ -194,6 +202,12 @@ export interface SessionStore {
     promise: Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }>,
   ): void;
   clearInflightFinale(sessionId: string): void;
+
+  /* #59 — Case-file PDF cache + single-flight (per-locale). */
+  setCaseFilePdf(sessionId: string, locale: 'tr' | 'en', buf: Buffer): void;
+  getInflightCaseFile(sessionId: string, locale: 'tr' | 'en'): Promise<Buffer> | undefined;
+  setInflightCaseFile(sessionId: string, locale: 'tr' | 'en', promise: Promise<Buffer>): void;
+  clearInflightCaseFile(sessionId: string, locale: 'tr' | 'en'): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -235,6 +249,8 @@ export class MemorySessionStore implements SessionStore {
     string,
     Promise<{ tr: string; en: string; culpritName: string | null; outcome: string }>
   > = new Map();
+  /** #59: per-locale single-flight registry for the case-file PDF render. */
+  protected inflightCaseFiles: Map<string, Promise<Buffer>> = new Map();
   private static readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   private static readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // check every 5 minutes
 
@@ -285,6 +301,7 @@ export class MemorySessionStore implements SessionStore {
       openingReady: false,
       reconstruction: null,
       finaleText: null,
+      caseFilePdf: {},
     };
 
     this.sessions.set(session.id, session);
@@ -561,6 +578,25 @@ export class MemorySessionStore implements SessionStore {
   clearInflightFinale(sessionId: string): void {
     this.inflightFinales.delete(sessionId);
   }
+
+  setCaseFilePdf(sessionId: string, locale: 'tr' | 'en', buf: Buffer): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.caseFilePdf[locale] = buf;
+    session.lastActivityAt = Date.now();
+  }
+
+  getInflightCaseFile(sessionId: string, locale: 'tr' | 'en'): Promise<Buffer> | undefined {
+    return this.inflightCaseFiles.get(`${sessionId}:${locale}`);
+  }
+
+  setInflightCaseFile(sessionId: string, locale: 'tr' | 'en', promise: Promise<Buffer>): void {
+    this.inflightCaseFiles.set(`${sessionId}:${locale}`, promise);
+  }
+
+  clearInflightCaseFile(sessionId: string, locale: 'tr' | 'en'): void {
+    this.inflightCaseFiles.delete(`${sessionId}:${locale}`);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -741,6 +777,9 @@ function deserializeSession(data: StoredSessionData): SessionData {
     openingReady: data.openingReady ?? false,
     reconstruction: data.reconstruction ?? null,
     finaleText: data.finaleText ?? null,
+    // #59: PDF buffers are never persisted (Firestore size limit, plus
+    // they regenerate cheaply from cached reconstruction).
+    caseFilePdf: {},
   };
 }
 

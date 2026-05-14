@@ -298,6 +298,13 @@ export const T = {
     onboardingHint: 'Aynı oyunda farklı dilde oynayan oyuncular olabilir — herkes aynı hikayeyi kendi dilinde okur.',
   },
 
+  caseFile: {
+    download: 'Vaka Dosyasını İndir',
+    preparing: 'PDF hazırlanıyor…',
+    failed: 'PDF oluşturulamadı, tekrar dene',
+    retry: 'Tekrar Dene',
+  },
+
   reconstruction: {
     cta: 'Olay Yerini Yeniden Canlandır',
     loading: 'Gerçek olaylar bir araya getiriliyor…',

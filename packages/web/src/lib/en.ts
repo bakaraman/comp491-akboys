@@ -301,6 +301,13 @@ export const T: Translations = {
     onboardingHint: 'Players in the same game can pick different languages — everyone reads the same story in their own.',
   },
 
+  caseFile: {
+    download: 'Download Case File',
+    preparing: 'Preparing PDF…',
+    failed: 'Could not generate the PDF, please retry',
+    retry: 'Try Again',
+  },
+
   reconstruction: {
     cta: 'Reconstruct the Crime Scene',
     loading: 'Piecing together what really happened…',
