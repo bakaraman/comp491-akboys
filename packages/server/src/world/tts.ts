@@ -54,16 +54,34 @@ export interface TtsOptions {
 }
 
 /**
+ * Strip markdown formatting so TTS doesn't read punctuation like "asterisk" aloud.
+ * Applied only in the TTS path — the frontend still receives the original markdown.
+ */
+function stripMarkdownForTts(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')            // bold
+    .replace(/\*(.+?)\*/g, '$1')                 // italic
+    .replace(/__(.+?)__/g, '$1')                 // underline
+    .replace(/^>\s*/gm, '')                       // blockquote prefix
+    .replace(/^#{1,6}\s+/gm, '')                  // headings
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')     // links → text only
+    .replace(/`([^`]+)`/g, '$1')                  // inline code
+    .replace(/^---+\s*$/gm, '');                  // horizontal rules
+}
+
+/**
  * Generate TTS audio. Returns a Response object whose body can be piped.
  */
 export async function streamTts(opts: TtsOptions): Promise<Response> {
   const voice = opts.voice ?? 'ash';
   const format = opts.format ?? 'mp3';
   const instructions = opts.instructions ?? DEFAULT_INSTRUCTIONS;
-  const text = opts.text.slice(0, 4000);
+  // Issue #63: strip markdown BEFORE the API call so it doesn't read
+  // "asterisk" aloud. Frontend still receives the original markdown.
+  const text = stripMarkdownForTts(opts.text).slice(0, 4000);
   const t0 = Date.now();
 
-  console.log(`${DEBUG} ▶ voice=${voice} format=${format} chars=${opts.text.length}`);
+  console.log(`${DEBUG} ▶ voice=${voice} format=${format} chars=${opts.text.length} (stripped=${text.length})`);
 
   try {
     // Some OpenAI SDK versions haven't added `ash`/`ballad`/`fable`/`verse` to the

@@ -375,7 +375,16 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       let observedLine: string;
       let directives: ReturnType<typeof parseStructuredResponse>['directives'];
 
-      const structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
+      // Issue #65: single automatic retry on transient null response before
+      // falling back to legacy text (sessionId threaded through to usage log).
+      let structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
+      if (structuredResult === null) {
+        console.warn('[narrator-structured] first attempt returned null, retrying...');
+        structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
+        if (structuredResult === null) {
+          console.error('[narrator-structured] both attempts failed, falling back to legacy text');
+        }
+      }
 
       if (structuredResult) {
         // Structured path succeeded — parse with schema validation
@@ -501,6 +510,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         suggestions = buildContextFallbacks(sceneCtx);
       }
 
+      // Issue #49: emit players:updated BEFORE narrator:done so the map reflects
+      // the new position before narrator text describing the move appears.
+      void store.sync(sessionId);
+      const updatedPlayersAfterAction = Array.from(session.players.values()).map(toPlayerDTO);
+      io.to(sessionId).emit('players:updated', { players: updatedPlayersAfterAction });
+
       // Send narrator:done to the actor AND to same-room witnesses.
       // Witnesses see the full text but with the actor's name attached so the UI
       // can visually mark "this was X's action" in the shared stream.
@@ -517,12 +532,6 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       // No observed-summary emit anymore — removed in Velvet Shadow v2.
       // observedLine is unused; we leave parser compatibility but ignore output.
       void observedLine;
-
-      void store.sync(sessionId);
-
-      // Always broadcast updated player state after each action resolves
-      const updatedPlayersAfterAction = Array.from(session.players.values()).map(toPlayerDTO);
-      io.to(sessionId).emit('players:updated', { players: updatedPlayersAfterAction });
 
       console.log(`[batcher] narrator done for ${action.playerName} (${directives.length} directives, ${witnessIds.length} witnesses)`);
     }
