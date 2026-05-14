@@ -17,7 +17,7 @@ import type { ChatMessage } from '@akboys/shared';
  * gpt-4o       : previous gen, still solid
  * gpt-4o-mini  : fast, cheap, good for dev/testing
  */
-const MODEL = 'gpt-5.4';
+const MODEL = 'gpt-4o';
 const REASONING_EFFORT: 'low' | 'medium' | 'high' = 'medium';
 // gpt-5.4 reasoning tokens count against max_completion_tokens, so bump
 // the ceiling so the visible output isn't starved by reasoning work.
@@ -60,8 +60,7 @@ export async function* narratorChatStream(
   const stream = await getClient().chat.completions.create({
     model: MODEL,
     messages: buildMessages(systemPrompt, history),
-    max_completion_tokens: MAX_TOKENS,
-    reasoning_effort: REASONING_EFFORT,
+    max_tokens: MAX_TOKENS,
     stream: true,
   });
 
@@ -103,8 +102,7 @@ export async function narratorStructuredResponse(
     const completion = await getClient().chat.completions.create({
       model: MODEL,
       messages: buildMessages(systemPrompt, history),
-      max_completion_tokens: MAX_TOKENS,
-      reasoning_effort: REASONING_EFFORT,
+      max_tokens: MAX_TOKENS,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -178,15 +176,14 @@ export async function narratorChat(
   const completion = await getClient().chat.completions.create({
     model: MODEL,
     messages: buildMessages(systemPrompt, history),
-    max_completion_tokens: MAX_TOKENS,
-    reasoning_effort: REASONING_EFFORT,
+    max_tokens: MAX_TOKENS,
   });
 
   return completion.choices[0]?.message?.content || 'The narrator is silent...';
 }
 
 /** Fast model for lightweight tasks — gpt-5-nano with minimal reasoning for speed */
-const FAST_MODEL = 'gpt-5-nano';
+const FAST_MODEL = 'gpt-4o-mini';
 
 /**
  * Scene context for grounded suggestions — what the player can actually
@@ -294,8 +291,7 @@ KESİN KURALLAR:
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    max_completion_tokens: 150,
-    reasoning_effort: 'minimal' as 'low',
+    max_tokens: 150,
   });
 
   const raw = completion.choices[0]?.message?.content || '[]';
