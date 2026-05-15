@@ -8,7 +8,7 @@
  * @since 2026-03-12
  */
 
-import type { ChatMessage } from '@akboys/shared';
+import type { ChatMessage, WorldData } from '@akboys/shared';
 import type OpenAI from 'openai';
 import { openaiClient, openaiStreamClient } from '../lib/openai-client.js';
 import { withOpenAIRetry } from '../lib/openai-retry.js';
@@ -128,9 +128,18 @@ export async function narratorStructuredResponse(
   systemPrompt: string,
   history: ChatMessage[],
   sessionId?: string,
+  world?: WorldData | null,
 ): Promise<StructuredNarratorResponse | null> {
   const t0 = Date.now();
   console.log(`[narrator-structured] ▶ model=${MODEL} historyLen=${history.length}`);
+
+  // Issue #60: when a world is available, lock `target` to an enum of real
+  // room IDs so the model can't emit a typo'd or hallucinated room.
+  const roomIds = world?.rooms.map((r) => r.id) ?? [];
+  const targetSchema: Record<string, unknown> = roomIds.length > 0
+    ? { type: 'string', enum: roomIds, description: 'Exact room ID from the ROOMS list. Must be one of the listed IDs.' }
+    : { type: 'string', description: 'Room ID, item ID, number for SANITY, npcId:roomId for NPC_MOVE, or roomId:direction for DISCOVER_EXIT' };
+
   try {
     const completion = await withOpenAIRetry('narrator-structured', () =>
       openaiClient().chat.completions.create({
@@ -159,15 +168,15 @@ export async function narratorStructuredResponse(
                   items: {
                     type: 'object',
                     properties: {
-                      type: { type: 'string', description: 'MOVE, PICKUP, OPEN, CLOSE, UNLOCK, BREAK, REVEAL, USE, REMOVE, STATE, DISCOVER, SANITY, NPC_MOOD, NPC_MEMORY, NPC_MOVE, or DISCOVER_EXIT' },
+                      type: { type: 'string', description: 'MOVE is the only valid type.' },
                       player: { type: 'string', description: 'Player name' },
-                      target: { type: 'string', description: 'Room ID, item ID, number for SANITY, npcId:roomId for NPC_MOVE, or roomId:direction for DISCOVER_EXIT' },
-                      detail: { type: 'string', description: 'Optional extra info: disposition for NPC_MOOD (friendly/neutral/hostile/scared), memory text for NPC_MEMORY' },
+                      target: targetSchema,
+                      detail: { type: 'string', description: 'Optional extra info' },
                     },
                     required: ['type', 'player', 'target', 'detail'],
                     additionalProperties: false,
                   },
-                  description: 'State change directives. Only include if something changed.',
+                  description: 'State change directives. Only include MOVE if the player changed room.',
                 },
               },
               required: ['response', 'observed', 'directives'],

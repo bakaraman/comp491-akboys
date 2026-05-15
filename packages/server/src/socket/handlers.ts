@@ -376,11 +376,13 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       let directives: ReturnType<typeof parseStructuredResponse>['directives'];
 
       // Issue #65: single automatic retry on transient null response before
-      // falling back to legacy text (sessionId threaded through to usage log).
-      let structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
+      // falling back to legacy text. sessionId threaded through to usage log.
+      // Issue #60: pass session.world so the schema can enum-restrict target
+      // to real room IDs, eliminating the "travelling stuck" typo bug.
+      let structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId, session.world);
       if (structuredResult === null) {
         console.warn('[narrator-structured] first attempt returned null, retrying...');
-        structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId);
+        structuredResult = await narratorStructuredResponse(systemPrompt, session.history, sessionId, session.world);
         if (structuredResult === null) {
           console.error('[narrator-structured] both attempts failed, falling back to legacy text');
         }
@@ -432,10 +434,36 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
 
       // Validate and apply directives against canonical server state
       for (const directive of directives) {
-        const result = validateDirective(directive, session, scenario, action.playerId, action.roomId);
+        let result = validateDirective(directive, session, scenario, action.playerId, action.roomId);
+
+        // Layer B: fuzzy match recovery — if MOVE target doesn't match a room ID,
+        // try case-insensitive comparison against room names as a safety net.
+        if (!result.valid && directive.type === 'MOVE' && session.world) {
+          const needle = directive.target.toLowerCase();
+          const matched = scenario.rooms.filter((r) => r.name.toLowerCase() === needle);
+          if (matched.length === 1) {
+            const originalTarget = directive.target;
+            directive.target = matched[0].id;
+            result = validateDirective(directive, session, scenario, action.playerId, action.roomId);
+            if (result.valid) {
+              console.log(`[directive] FUZZY_MATCHED MOVE ${directive.playerName} -> ${originalTarget} → ${directive.target}`);
+            } else {
+              // re-validation failed (shouldn't happen, but restore and fall through)
+              directive.target = originalTarget;
+            }
+          }
+        }
 
         if (!result.valid) {
           console.log(`[directive] REJECTED: ${directive.type} ${directive.playerName} -> ${directive.target}: ${result.reason}`);
+          for (const sid of actorSockets) {
+            io.to(sid).emit('directive:rejected', {
+              playerId: action.playerId,
+              type: directive.type,
+              target: directive.target,
+              reason: result.reason ?? 'Unknown',
+            });
+          }
           continue;
         }
 
