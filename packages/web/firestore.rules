@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Game sessions: server-only via firebase-admin SDK (admin bypasses rules).
+    // Block all client access.
+    match /sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    // OpenAI usage logs (PR #67): admin SDK writes from the server; the
+    // /admin/usage dashboard reads from the client. Any authenticated user
+    // can read; clients cannot write.
+    match /openai_usage/{doc} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}
