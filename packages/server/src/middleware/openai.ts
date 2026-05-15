@@ -116,12 +116,53 @@ export async function* narratorChatStream(
  * Structured narrator response — returns JSON with guaranteed schema.
  * Used for per-player action responses where we need [RESPONSE]/[OBSERVED]/directives.
  *
+ * #58 — `response` and `observed` are bilingual ({tr, en}) so a single
+ * LLM call serves both Turkish and English players in the same session
+ * with semantically identical content.
+ *
  * Returns parsed JSON or null on failure.
  */
+export interface BilingualText {
+  tr: string;
+  en: string;
+}
+
 export interface StructuredNarratorResponse {
-  response: string;
-  observed: string;
+  response: BilingualText;
+  observed: BilingualText;
   directives: Array<{ type: string; player: string; target: string; detail?: string }>;
+}
+
+function isBilingualText(v: unknown): v is BilingualText {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as { tr?: unknown }).tr === 'string' &&
+    typeof (v as { en?: unknown }).en === 'string'
+  );
+}
+
+/**
+ * #58: detect when the LLM has accidentally nested another JSON object
+ * inside a bilingual string slice. We've seen the model emit
+ *   response.tr = "{ \"response\": \"...\", \"directives\": [...] }"
+ * when bilingual + structured-output context confuses the schema. Treat
+ * any value that parses cleanly as JSON containing a `response` /
+ * `directives` / `observed` key as poisoned so the caller can retry.
+ */
+function isJsonContaminated(s: string): boolean {
+  const trimmed = s.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      ('response' in parsed || 'directives' in parsed || 'observed' in parsed)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function narratorStructuredResponse(
@@ -156,12 +197,24 @@ export async function narratorStructuredResponse(
               type: 'object',
               properties: {
                 response: {
-                  type: 'string',
-                  description: 'Detailed second-person narrator response for the acting player. Use markdown formatting.',
+                  type: 'object',
+                  properties: {
+                    tr: { type: 'string', description: 'Turkish narrator response for the acting player. Second person. Markdown allowed.' },
+                    en: { type: 'string', description: 'English narrator response — semantically identical to the Turkish version: same details, same tone, same pacing. Native English, not literal translation.' },
+                  },
+                  required: ['tr', 'en'],
+                  additionalProperties: false,
+                  description: 'Bilingual second-person narrator response for the acting player.',
                 },
                 observed: {
-                  type: 'string',
-                  description: 'Brief third-person sentence of what nearby players observe. No secrets or details.',
+                  type: 'object',
+                  properties: {
+                    tr: { type: 'string', description: 'Turkish brief third-person sentence of what nearby players observe. No secrets.' },
+                    en: { type: 'string', description: 'English version of the same observed-by-witnesses line.' },
+                  },
+                  required: ['tr', 'en'],
+                  additionalProperties: false,
+                  description: 'Bilingual brief third-person sentence of what nearby players observe.',
                 },
                 directives: {
                   type: 'array',
@@ -201,13 +254,26 @@ export async function narratorStructuredResponse(
 
     const parsed = JSON.parse(raw);
 
-    // Validate shape
     if (
-      typeof parsed.response === 'string' &&
-      typeof parsed.observed === 'string' &&
+      isBilingualText(parsed.response) &&
+      isBilingualText(parsed.observed) &&
       Array.isArray(parsed.directives)
     ) {
-      console.log(`[narrator-structured]   response: ${parsed.response.slice(0, 200).replace(/\n/g, ' ')}...`);
+      // #58: defensive check — refuse poisoned outputs where the model
+      // accidentally nested a JSON object inside one of the bilingual
+      // strings. Returning null lets the caller retry exactly once before
+      // falling back to legacy text.
+      if (
+        isJsonContaminated(parsed.response.tr) ||
+        isJsonContaminated(parsed.response.en) ||
+        isJsonContaminated(parsed.observed.tr) ||
+        isJsonContaminated(parsed.observed.en)
+      ) {
+        console.warn('[narrator-structured] ✗ JSON contamination detected inside a bilingual slice — treating as null so the caller can retry');
+        return null;
+      }
+
+      console.log(`[narrator-structured]   response.tr: ${parsed.response.tr.slice(0, 160).replace(/\n/g, ' ')}...`);
       console.log(`[narrator-structured]   directives: ${parsed.directives.length} (${parsed.directives.map((d: { type: string }) => d.type).join(', ')})`);
       return parsed as StructuredNarratorResponse;
     }
@@ -280,24 +346,29 @@ export interface SceneContext {
 }
 
 /**
- * Build a context-aware fallback when the API fails or returns garbage.
+ * Build a context-aware bilingual fallback when the API fails or returns garbage.
  * Always references something that actually exists in the scene, never
- * a generic "Biriyle konuş" when no NPC is around.
+ * a generic "Biriyle konuş" when no NPC is around. Names are proper nouns
+ * — same string in both languages.
  */
-export function buildContextFallbacks(ctx?: SceneContext): string[] {
-  const out: string[] = [];
+export function buildContextFallbacks(ctx?: SceneContext): BilingualText[] {
+  const out: BilingualText[] = [];
 
   const npc = ctx?.npcsInRoom?.[0];
-  if (npc) out.push(`${npc.name}'a yaklaş`);
+  if (npc) out.push({ tr: `${npc.name}'a yaklaş`, en: `Approach ${npc.name}` });
 
   const item = ctx?.itemsInRoom?.[0];
-  if (item) out.push(`${item.name}'i incele`);
+  if (item) out.push({ tr: `${item.name}'i incele`, en: `Examine ${item.name}` });
 
   const adj = ctx?.adjacentRoomNames?.[0];
-  if (adj) out.push(`${adj}'a yönel`);
+  if (adj) out.push({ tr: `${adj}'a yönel`, en: `Head to ${adj}` });
 
   // Fill remaining slots with safe scene-agnostic prompts that always make sense.
-  const generic = ['Etrafa kulak ver', 'Eşyalarını gözden geçir', 'Çıkışı ara'];
+  const generic: BilingualText[] = [
+    { tr: 'Etrafa kulak ver', en: 'Listen for sounds' },
+    { tr: 'Eşyalarını gözden geçir', en: 'Check your surroundings' },
+    { tr: 'Çıkışı ara', en: 'Look for an exit' },
+  ];
   let gi = 0;
   while (out.length < 3 && gi < generic.length) {
     out.push(generic[gi++]);
@@ -314,11 +385,16 @@ export function buildContextFallbacks(ctx?: SceneContext): string[] {
  * back to generic suggestions but at least won't invent characters that aren't
  * in the world (e.g. "Barmenle konuş" in a boarding-school scenario).
  */
+/**
+ * Generate 3 follow-up action suggestions in BOTH languages so the client
+ * can render the player's locale via pickLang. Single LLM call with a
+ * bilingual structured schema (#58).
+ */
 export async function suggestFollowUps(
   lastNarratorText: string,
   ctx?: SceneContext,
   sessionId?: string,
-): Promise<string[]> {
+): Promise<BilingualText[]> {
   // Compact, model-readable scene block. Kept short to avoid token bloat.
   const sceneBlock = (() => {
     if (!ctx) return '';
@@ -340,27 +416,37 @@ export async function suggestFollowUps(
     return lines.join('\n');
   })();
 
-  const systemPrompt = `Sen bir dedektif oyununda 3 öneri butonu üreten asistansın.
+  const systemPrompt = `You generate 3 suggestion buttons for a detective game in BOTH Turkish and English.
 
-KESİN KURALLAR:
-- ÇIKTI: SADECE 3 string içeren bir JSON dizisi. Başka bir şey yok.
-- HEPSİ TÜRKÇE. Her biri en fazla 6 kelime, SOMUT bir eylem.
-- Her öneri SAHNEDE GÖRÜNEN bir kişiye, nesneye veya komşu odaya atıfta bulunmalı.
-- Sahnede olmayan kişi/nesne/yer ASLA uydurma. Liste dışı isim kullanma.
-- Generic ifadeler ("biriyle konuş", "etrafa bak") yalnızca SAHNE TAMAMEN BOŞSA kullanılır.
+OUTPUT — strict JSON object with shape: { "suggestions": [ { "tr": "...", "en": "..." }, ... ] } with EXACTLY 3 items.
+Each suggestion: a CONCRETE action, at most 6 words in either language.
+Each suggestion MUST reference a person, object, or adjacent room that is actually in the scene block. Never invent.
+Generic phrasings (look around, examine the room) are allowed only when the scene is completely empty.
 
-ÖRNEK 1 — Sahne: morg, kişiler [Doktor Şevket], nesneler [otopsi raporu, çelik makas]:
-["Doktor Şevket'e ölüm saatini sor","Otopsi raporunu oku","Çelik makası incele"]
+EXAMPLE 1 — Scene: morg/morgue, people [Doktor Şevket], objects [otopsi raporu, çelik makas]:
+[
+  {"tr":"Doktor Şevket'e ölüm saatini sor","en":"Ask Doktor Şevket the time of death"},
+  {"tr":"Otopsi raporunu oku","en":"Read the autopsy report"},
+  {"tr":"Çelik makası incele","en":"Examine the steel shears"}
+]
 
-ÖRNEK 2 — Sahne: bahçe, kişi yok, nesneler [kırık fener], komşu [koridor]:
-["Kırık feneri al","Çitin ardına bak","Koridora yönel"]
+EXAMPLE 2 — Scene: bahçe/garden, no people, objects [kırık fener], adjacent [koridor/corridor]:
+[
+  {"tr":"Kırık feneri al","en":"Pick up the broken lantern"},
+  {"tr":"Çitin ardına bak","en":"Look behind the fence"},
+  {"tr":"Koridora yönel","en":"Head into the corridor"}
+]
 
-ÖRNEK 3 — Sahne: boş çatı katı, kişi yok, nesne yok, komşu [merdiven boşluğu]:
-["Etrafa kulak ver","Tozlu zemine bak","Merdiven boşluğuna in"]`;
+EXAMPLE 3 — Scene: empty attic, no people, no objects, adjacent [merdiven boşluğu/stairwell]:
+[
+  {"tr":"Etrafa kulak ver","en":"Listen for sounds"},
+  {"tr":"Tozlu zemine bak","en":"Inspect the dusty floor"},
+  {"tr":"Merdiven boşluğuna in","en":"Descend the stairwell"}
+]`;
 
   const userPrompt = sceneBlock
-    ? `${sceneBlock}\n\nAnlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-400)}"\n\n3 Türkçe öneri (yalnızca JSON dizisi):`
-    : `Anlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-500)}"\n\n3 Türkçe öneri (yalnızca JSON dizisi):`;
+    ? `${sceneBlock}\n\nAnlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-400)}"\n\n3 bilingual suggestion (JSON object as specified):`
+    : `Anlatıcı az önce şunu söyledi:\n"${lastNarratorText.slice(-500)}"\n\n3 bilingual suggestion (JSON object as specified):`;
 
   const t0 = Date.now();
   let completion;
@@ -372,8 +458,34 @@ KESİN KURALLAR:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        max_completion_tokens: 150,
+        max_completion_tokens: 250,
         reasoning_effort: 'minimal' as 'low',
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'suggestions',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                suggestions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      tr: { type: 'string', description: 'Turkish suggestion, max 6 words.' },
+                      en: { type: 'string', description: 'English suggestion — semantically identical to Turkish.' },
+                    },
+                    required: ['tr', 'en'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['suggestions'],
+              additionalProperties: false,
+            },
+          },
+        },
       }),
     );
   } catch (err) {
@@ -398,11 +510,14 @@ KESİN KURALLAR:
     success: true,
   });
 
-  const raw = completion.choices[0]?.message?.content || '[]';
+  const raw = completion.choices[0]?.message?.content || '{"suggestions":[]}';
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length >= 3) {
-      return parsed.slice(0, 3).map((s: unknown) => String(s));
+    if (Array.isArray(parsed.suggestions) && parsed.suggestions.length >= 3) {
+      const out: BilingualText[] = parsed.suggestions
+        .slice(0, 3)
+        .filter(isBilingualText);
+      if (out.length === 3) return out;
     }
   } catch { /* fallback below */ }
   return buildContextFallbacks(ctx);

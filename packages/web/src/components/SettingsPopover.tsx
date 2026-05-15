@@ -18,7 +18,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSoundEffects } from '@/hooks/useSoundEffects';
 import { useAmbientSettings } from '@/hooks/useAmbientLoop';
-import { T } from '@/lib/tr';
+import { useT } from '@/hooks/useLocale';
+import { LocaleSection } from './LocaleSection';
 
 /* ------------------------------------------------------------------ */
 /*  Speaker icon (open/close trigger)                                  */
@@ -55,6 +56,7 @@ interface ChannelRowProps {
 }
 
 function ChannelRow({ label, volume, onVolumeChange, muted, onToggleMute }: ChannelRowProps): React.ReactElement {
+  const T = useT();
   const percent = Math.round(volume * 100);
   return (
     <div style={{ marginBottom: '14px' }}>
@@ -146,6 +148,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: SettingsPopoverProps): React.ReactElement {
+  const T = useT();
   const ambient = useAmbientSettings();
   const sfx = useSoundEffects();
   const [open, setOpen] = useState(false);
@@ -249,6 +252,9 @@ export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: Se
 
           {voice && <VoiceSection voice={voice} />}
 
+          {/* #58: Language section. Grayed-out + tooltip after game starts. */}
+          <LocaleSection />
+
           {onReplayTutorial && (
             <button
               onClick={() => {
@@ -287,6 +293,7 @@ export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: Se
 /* ------------------------------------------------------------------ */
 
 function VoiceSection({ voice }: { voice: VoiceSettingsSlice }): React.ReactElement {
+  const T = useT();
   const statusLabel = (() => {
     switch (voice.status) {
       case 'ready': return T.voice.ready;
@@ -355,6 +362,7 @@ interface DevicePickerProps {
 }
 
 function DevicePicker({ label, devices, selectedId, onSelect, disabled }: DevicePickerProps): React.ReactElement {
+  const T = useT();
   return (
     <div style={{ marginBottom: '10px' }}>
       <label style={{

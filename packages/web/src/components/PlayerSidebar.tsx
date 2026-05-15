@@ -12,6 +12,7 @@
 
 import React, { useEffect } from 'react';
 import type { PlayerDataDTO } from '@/types/shared';
+import { useT } from '@/hooks/useLocale';
 
 interface PlayerSidebarProps {
   players: PlayerDataDTO[];
@@ -32,6 +33,7 @@ export function PlayerSidebar({
   talkingPlayerIds,
   selfTransmitting,
 }: PlayerSidebarProps) {
+  const T = useT();
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
@@ -90,7 +92,7 @@ export function PlayerSidebar({
             fontFamily: 'monospace', textTransform: 'uppercase',
             letterSpacing: '2px',
           }}>
-            Players ({players.length})
+            {T.game.playersHeading} ({players.length})
           </span>
           <button
             onClick={onClose}
@@ -181,7 +183,7 @@ export function PlayerSidebar({
                           backgroundColor: '#1a1a1a',
                           borderRadius: '4px',
                         }}>
-                          you
+                          {T.game.youSuffix}
                         </span>
                       )}
                     </div>
@@ -197,7 +199,7 @@ export function PlayerSidebar({
                         backgroundColor: player.isConnected ? '#4a8a4a' : '#8a4a4a',
                         display: 'inline-block',
                       }} />
-                      {player.isConnected ? 'Online' : 'Offline'}
+                      {player.isConnected ? T.game.statusOnline : T.game.statusOffline}
                     </div>
                   </div>
                 </div>

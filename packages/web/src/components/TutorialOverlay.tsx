@@ -22,7 +22,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { T } from '@/lib/tr';
+import { useT } from '@/hooks/useLocale';
+import type { Translations } from '@/lib/i18n';
 
 const STORAGE_KEY = 'velvet-tutorial-seen';
 const HIGHLIGHT_PADDING = 6;
@@ -70,7 +71,7 @@ export function clearTutorialSeen(): void {
 /*  Default steps                                                      */
 /* ------------------------------------------------------------------ */
 
-function defaultSteps(): TutorialStep[] {
+function defaultSteps(T: Translations): TutorialStep[] {
   return [
     { id: 'turn',     target: 'turn-counter',   title: T.tutorial.steps.turn.title,     body: T.tutorial.steps.turn.body },
     { id: 'chat',     target: 'chat-area',      title: T.tutorial.steps.chat.title,     body: T.tutorial.steps.chat.body },
@@ -89,6 +90,7 @@ export function TutorialOverlay({
   onClose,
   steps,
 }: TutorialOverlayProps): React.ReactElement | null {
+  const T = useT();
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
 
@@ -96,7 +98,7 @@ export function TutorialOverlay({
   // Without this, the parameter default would build a fresh array on
   // every render, breaking referential equality and triggering an
   // infinite recompute → setState → render loop.
-  const stepsToUse = useMemo(() => steps ?? defaultSteps(), [steps]);
+  const stepsToUse = useMemo(() => steps ?? defaultSteps(T), [steps, T]);
   const current = stepsToUse[stepIndex];
   const total = stepsToUse.length;
   const isFirst = stepIndex === 0;

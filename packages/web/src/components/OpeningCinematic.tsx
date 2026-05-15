@@ -13,7 +13,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { T } from '@/lib/tr';
+import { useT } from '@/hooks/useLocale';
 import { getAuthHeaders } from '@/lib/firebase';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
@@ -36,6 +36,7 @@ export function OpeningCinematic({
   ttsAudioUrl,
   onStart,
 }: OpeningCinematicProps) {
+  const T = useT();
   const [visibleChars, setVisibleChars] = useState(0);
   const [ttsReady, setTtsReady] = useState(false);
   const musicRef = useRef<HTMLAudioElement | null>(null);

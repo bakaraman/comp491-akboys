@@ -12,7 +12,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { T } from '@/lib/tr';
+import { useLocale, useT } from '@/hooks/useLocale';
 import { getAuthHeaders } from '@/lib/firebase';
 import { ReconstructionReplay } from './ReconstructionReplay';
 
@@ -37,6 +37,8 @@ export function FinaleCinematic({
   onHome,
   onPlayAgain,
 }: FinaleCinematicProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const [fullText, setFullText] = useState('');
   const [streamDone, setStreamDone] = useState(false);
   const [visibleChars, setVisibleChars] = useState(0);
@@ -45,6 +47,9 @@ export function FinaleCinematic({
   const [culpritName, setCulpritName] = useState<string | null>(null);
   /* A.3: post-finale crime-scene reconstruction modal */
   const [reconstructionOpen, setReconstructionOpen] = useState(false);
+  /* #59: case-file PDF download state */
+  const [caseFileLoading, setCaseFileLoading] = useState(false);
+  const [caseFileError, setCaseFileError] = useState<string | null>(null);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const ttsRef = useRef<HTMLAudioElement | null>(null);
   const ttsStartedRef = useRef(false);
@@ -82,63 +87,43 @@ export function FinaleCinematic({
     };
   }, []);
 
-  // Stream the finale text from the server
+  // Fetch the finale text (bilingual single-flight; #58 follow-up).
+  //
+  // Server now returns the full text in one JSON response — the SSE chunk
+  // protocol was retired so two clients with different locales no longer
+  // race two parallel OpenAI streams. UX still feels live because the
+  // visibleChars typewriter is driven by audio.currentTime once TTS plays.
   useEffect(() => {
     let cancelled = false;
     const t0 = Date.now();
 
-    async function stream() {
+    async function fetchFinale() {
       try {
-        console.log(`${DEBUG} stream start outcome=${outcome}`);
+        console.log(`${DEBUG} fetch start outcome=${outcome} locale=${locale}`);
         const headers = await getAuthHeaders();
         const res = await fetch(`${API_BASE}/api/chat/finale`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ sessionId, outcome }),
+          body: JSON.stringify({ sessionId, outcome, locale }),
         });
-        if (!res.ok || !res.body) {
-          console.error(`${DEBUG} stream HTTP ${res.status}`);
+        if (!res.ok) {
+          console.error(`${DEBUG} fetch HTTP ${res.status}`);
           if (!cancelled) {
             setFullText(summary);
             setStreamDone(true);
           }
           return;
         }
+        const data = (await res.json()) as { fullText?: string; culpritName?: string | null };
+        if (cancelled) return;
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let acc = '';
-
-        while (!cancelled) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.type === 'chunk') {
-                acc += evt.content;
-              } else if (evt.type === 'done') {
-                acc = evt.content || acc;
-                if (evt.culpritName) setCulpritName(evt.culpritName);
-              }
-            } catch {
-              // skip
-            }
-          }
-        }
-
-        if (!cancelled) {
-          console.log(`${DEBUG} stream done (${Date.now() - t0}ms, ${acc.length} chars)`);
-          setFullText(acc);
-          setStreamDone(true);
-        }
+        const acc = data.fullText ?? summary;
+        if (data.culpritName) setCulpritName(data.culpritName);
+        console.log(`${DEBUG} fetch done (${Date.now() - t0}ms, ${acc.length} chars)`);
+        setFullText(acc);
+        setStreamDone(true);
       } catch (err) {
-        console.error(`${DEBUG} stream error`, err);
+        console.error(`${DEBUG} fetch error`, err);
         if (!cancelled) {
           setFullText(summary);
           setStreamDone(true);
@@ -146,11 +131,11 @@ export function FinaleCinematic({
       }
     }
 
-    stream();
+    fetchFinale();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, outcome, summary]);
+  }, [sessionId, outcome, summary, locale]);
 
   // Once stream completes, fetch + play TTS and sync text reveal
   useEffect(() => {
@@ -171,7 +156,11 @@ export function FinaleCinematic({
         const res = await fetch(`${API_BASE}/api/chat/tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ text: fullText, voice: 'ash' }),
+          body: JSON.stringify({
+            text: fullText,
+            locale,
+            voice: locale === 'en' ? 'onyx' : 'ash',
+          }),
         });
         if (!res.ok) {
           console.error(`${DEBUG} TTS HTTP ${res.status}`);
@@ -323,7 +312,7 @@ export function FinaleCinematic({
               marginBottom: '28px',
             }}
           >
-            Gerçek Katil · <span style={{ color: '#d4a843' }}>{culpritName}</span>
+            {T.finale.trueCulprit} · <span style={{ color: '#d4a843' }}>{culpritName}</span>
           </p>
         )}
 
@@ -353,6 +342,51 @@ export function FinaleCinematic({
               }}
             >
               {T.reconstruction.cta}
+            </button>
+            {/* #59: Premium case-file PDF download. */}
+            <button
+              onClick={async () => {
+                if (caseFileLoading) return;
+                setCaseFileLoading(true);
+                setCaseFileError(null);
+                try {
+                  const headers = await getAuthHeaders();
+                  const res = await fetch(`${API_BASE}/api/chat/case-file`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...headers },
+                    body: JSON.stringify({ sessionId, locale }),
+                  });
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `velvet-shadow-${sessionId.slice(0, 8)}-${locale}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } catch (err) {
+                  console.error(`${DEBUG} case-file download failed`, err);
+                  setCaseFileError(T.caseFile.failed);
+                } finally {
+                  setCaseFileLoading(false);
+                }
+              }}
+              disabled={caseFileLoading}
+              style={{
+                padding: '14px 24px',
+                backgroundColor: caseFileLoading ? '#2a2010' : '#15110a',
+                border: '1px solid #c8894a',
+                borderRadius: '8px',
+                color: caseFileLoading ? '#7a6a50' : '#c8894a',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                letterSpacing: '1px',
+                cursor: caseFileLoading ? 'wait' : 'pointer',
+              }}
+            >
+              {caseFileLoading ? T.caseFile.preparing : T.caseFile.download}
             </button>
             <button
               onClick={onHome}
@@ -386,6 +420,11 @@ export function FinaleCinematic({
               {T.finale.playAgain}
             </button>
           </div>
+        )}
+        {caseFileError && (
+          <p style={{ marginTop: '14px', fontSize: '12px', color: '#cf5b5b', fontFamily: 'monospace' }}>
+            {caseFileError}
+          </p>
         )}
 
         {!streamDone && !ttsStarted && (

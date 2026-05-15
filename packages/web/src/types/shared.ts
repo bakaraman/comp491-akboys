@@ -26,6 +26,12 @@ export interface GameState {
 
 export type PlayerRole = 'detective' | 'thief' | 'doctor' | 'journalist';
 
+/** Player's UI/narration language (#58). */
+export type Locale = 'tr' | 'en';
+
+/** Bilingual field reader contract (#58). See @/lib/i18n.pickLang. */
+export type Bilingual<T = string> = T | { tr: T; en: T };
+
 export interface PlayerDataDTO {
   id: string;
   name: string;
@@ -37,6 +43,8 @@ export interface PlayerDataDTO {
   visitedRooms: string[];
   isConnected: boolean;
   color: string;
+  /** Player's UI/narration language (#58). Defaults to 'tr' on old payloads. */
+  locale?: Locale;
 }
 
 export interface CommMessageDTO {
@@ -55,7 +63,7 @@ export interface CommMessageDTO {
 
 export interface ClientToServerEvents {
   'player:join': (
-    data: { sessionId: string; playerName: string },
+    data: { sessionId: string; playerName: string; locale?: Locale },
     callback: (response: { success: boolean; playerId?: string; error?: string }) => void,
   ) => void;
   'player:action': (data: { sessionId: string; playerId: string; message: string }) => void;
@@ -130,15 +138,15 @@ export interface ReconstructionEvent {
   roomName: string;
   actorNpcId: string;
   actorName: string;
-  actorRole: string;
-  description: string;
+  actorRole: Bilingual;
+  description: Bilingual;
   isCulpritAction: boolean;
 }
 
 export interface ReconstructionDTO {
-  title: string;
+  title: Bilingual;
   events: ReconstructionEvent[];
-  conclusion: string;
+  conclusion: Bilingual;
   generatedAt: number;
 }
 
@@ -176,10 +184,10 @@ export interface SharedEvidenceEntry {
 export interface ServerToClientEvents {
   'game:started': (data: {
     sessionId: string;
-    scenarioTitle: string;
+    scenarioTitle: Bilingual;
     players: PlayerDataDTO[];
-    /** C.1: shared opening narration for immediate render */
-    openingNarration?: string;
+    /** C.1 + #58: bilingual opening narration. */
+    openingNarration?: Bilingual;
   }) => void;
   'narrator:chunk': (data: { content: string; fullText: string; targetPlayerId?: string }) => void;
   'narrator:done': (data: {
@@ -269,16 +277,17 @@ export interface ServerToClientEvents {
   'story:ready': (data: {
     openingImageUrl: string | null;
     world: {
-      title: string;
-      setting: string;
-      openingNarration: string;
+      /** #58: bilingual. */
+      title: Bilingual;
+      setting: Bilingual;
+      openingNarration: Bilingual;
     };
     rooms: Array<{
       id: string;
       name: string;
       exits: Record<string, string | null>;
     }>;
-    npcs: Array<{ id: string; name: string; role: string }>;
+    npcs: Array<{ id: string; name: string; role: Bilingual }>;
     evidenceItems: Array<{ id: string; name: string }>;
   }) => void;
   'story:image-ready': (data: {

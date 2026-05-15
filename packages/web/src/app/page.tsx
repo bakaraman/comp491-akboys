@@ -17,15 +17,19 @@ import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
 import { ProfileButton } from '@/components/ProfileButton';
 import { SettingsPopover } from '@/components/SettingsPopover';
+import { LocaleOnboardingModal } from '@/components/LocaleOnboardingModal';
+import { LocaleToggle } from '@/components/LocaleToggle';
 import { useAmbientLoop } from '@/hooks/useAmbientLoop';
 import { useUiClickSound } from '@/lib/uiClick';
 import { authEnabled, signOutUser, getAuthHeaders } from '@/lib/firebase';
-import { T } from '@/lib/tr';
+import { useLocale, useT } from '@/hooks/useLocale';
 
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 const MAX_PLAYERS = 10;
 
 export default function HomePage() {
+  const T = useT();
+  const { lock: lockLocale } = useLocale();
   const router = useRouter();
   const { name, loaded, setName, clearName } = usePlayerName();
   const [roomCode, setRoomCode] = useState('');
@@ -54,6 +58,9 @@ export default function HomePage() {
       });
       const data = await res.json();
       if (data.sessionId) {
+        // #58: once we leave Home for a session, the player's locale is fixed
+        // so the world is generated and played in a single, consistent language.
+        lockLocale();
         router.push(`/session/${data.sessionId}`);
         return;
       }
@@ -85,6 +92,7 @@ export default function HomePage() {
       }
       const data = await res.json();
       if (data.sessionId) {
+        lockLocale();
         router.push(`/session/${data.sessionId}`);
         return;
       }
@@ -116,6 +124,7 @@ export default function HomePage() {
       }
       const data = await res.json();
       if (data.sessionId) {
+        lockLocale();
         router.push(`/session/${data.sessionId}?role=spectator`);
         return;
       }
@@ -142,6 +151,9 @@ export default function HomePage() {
           position: 'relative',
         }}
       >
+        {/* First-time locale picker — shown only when no preference is stored yet */}
+        <LocaleOnboardingModal />
+
         {/* First-time name popup */}
         {!name && <NamePopup onSave={setName} />}
 
@@ -174,8 +186,10 @@ export default function HomePage() {
         {/* A.2: Audio settings — fixed top-left so it never collides with
             ProfileButton (top-right) regardless of name length. align="left"
             makes the panel grow rightward so it never spills off-screen. */}
-        <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
+        <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30, display: 'flex', gap: '10px', alignItems: 'center' }}>
           <SettingsPopover align="left" />
+          {/* #58: quick language toggle on the home screen. */}
+          <LocaleToggle />
         </div>
 
         <div style={{ width: '100%', maxWidth: '560px', textAlign: 'center' }}>
@@ -396,7 +410,7 @@ export default function HomePage() {
                 }}
                 onMouseOut={(e) => (e.currentTarget.style.borderColor = '#2a2520')}
               >
-                👁 İzleyici olarak katıl
+                {T.home.spectatorJoin}
               </button>
             </div>
           </div>

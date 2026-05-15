@@ -15,7 +15,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { T } from '@/lib/tr';
+import { useT } from '@/hooks/useLocale';
 import { SettingsPopover } from './SettingsPopover';
 
 export interface LobbyPlayer {
@@ -55,6 +55,7 @@ export function LobbyScreen({
   onStartGame,
   isStartingGame,
 }: LobbyScreenProps) {
+  const T = useT();
   const [prompt, setPrompt] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
@@ -88,9 +89,10 @@ export function LobbyScreen({
         position: 'relative',
       }}
     >
-      {/* A.2: Audio settings — fixed top-left so it's always reachable in
-          lobby. align="left" so the panel opens rightward and doesn't
-          overflow the left edge of the viewport. */}
+      {/* A.2: Audio settings — fixed top-left so it's always reachable in lobby.
+          align="left" so the settings panel opens rightward and doesn't
+          overflow the left edge of the viewport. Locale is locked at this
+          point (#58 — locked on Create/Join) so the toggle is gone. */}
       <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
         <SettingsPopover align="left" />
       </div>
@@ -339,7 +341,7 @@ export function LobbyScreen({
               }}
             >
               {generationInFlight
-                ? storyStatus?.message || T.lobby.generating
+                ? T.lobby.generating
                 : T.lobby.createStory}
             </button>
 
@@ -353,7 +355,7 @@ export function LobbyScreen({
                   textAlign: 'center',
                 }}
               >
-                {storyStatus?.message || T.errors.generating}
+                {T.errors.generating}
               </p>
             )}
           </form>
@@ -380,7 +382,9 @@ export function LobbyScreen({
               }}
             >
               {generationInFlight
-                ? storyStatus?.message || T.lobby.generating
+                /* #58: server now emits phase-only; render the locale-aware
+                 * label so EN clients no longer see Turkish "Hikaye yazılıyor". */
+                ? T.lobby.generating
                 : T.lobby.waitingForHost}
             </div>
             {generationInFlight && (
@@ -423,7 +427,7 @@ export function LobbyScreen({
                   marginBottom: '8px',
                 }}
               >
-                Hikaye hazır. Perde açılıyor.
+                {T.lobby.storyReady}
               </p>
 
               {!gateReady && (
@@ -437,7 +441,7 @@ export function LobbyScreen({
                     marginBottom: '18px',
                   }}
                 >
-                  Ses hazırlanıyor...
+                  {T.lobby.audioPreparing}
                 </p>
               )}
               {gateReady && <div style={{ marginBottom: '18px' }} />}
@@ -464,8 +468,8 @@ export function LobbyScreen({
                   {isStartingGame
                     ? T.opening.loading
                     : !gateReady
-                    ? 'Hazırlanıyor…'
-                    : 'Perdeyi Aç'}
+                    ? T.lobby.preparing
+                    : T.lobby.openCurtain}
                 </button>
               )}
               {!isHost && (

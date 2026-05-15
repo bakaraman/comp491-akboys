@@ -44,6 +44,20 @@ interface BatchState {
 
 export class ActionBatcher {
   private batches = new Map<string, BatchState>();
+  /**
+   * Per-session in-flight chain.
+   *
+   * Without this, `fire()` could schedule a new batch while a previous
+   * batch was still mid-LLM-call. Two concurrent OpenAI streams race
+   * each other and the second one (a quick re-action) sometimes resolves
+   * first, so the chat shows narrator responses in the wrong order.
+   *
+   * We solve it by chaining each batch onto the previous Promise: the
+   * next batch's `onBatchFire` only starts once the previous one fully
+   * resolves. Per-session, so independent sessions still process in
+   * parallel.
+   */
+  private inflight = new Map<string, Promise<void>>();
   private store: SessionStore;
   private onBatchFire: (sessionId: string, actions: PlayerAction[]) => void | Promise<void>;
 
@@ -137,6 +151,21 @@ export class ActionBatcher {
 
     console.log(`[batcher] firing batch for session ${sessionId.slice(0, 8)}: ${actions.length} action(s) from ${new Set(actions.map((a) => a.playerName)).size} player(s)`);
 
-    this.onBatchFire(sessionId, actions);
+    // Chain on the previous in-flight batch for THIS session so two batches
+    // can never overlap. (Different sessions still run in parallel because
+    // we key the chain by sessionId.)
+    const previous = this.inflight.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => { /* previous batch errors are already logged; don't chain failures */ })
+      .then(() => this.onBatchFire(sessionId, actions));
+    this.inflight.set(sessionId, next);
+
+    // Once this batch settles, clear the slot — but only if no newer batch
+    // has overwritten it in the meantime.
+    void next.finally(() => {
+      if (this.inflight.get(sessionId) === next) {
+        this.inflight.delete(sessionId);
+      }
+    });
   }
 }

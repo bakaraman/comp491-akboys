@@ -24,9 +24,14 @@ const playerId  = z.string().min(1, 'playerId required');
 /*  ClientToServerEvents schemas                                        */
 /* ------------------------------------------------------------------ */
 
+/** Locale primitive — used by player:join (#58) */
+const localeSchema = z.enum(['tr', 'en']);
+
 export const PlayerJoinSchema = z.object({
   sessionId,
   playerName: z.string().min(1).max(32),
+  /** Optional for backward compat with older clients — defaults to 'tr' server-side. */
+  locale: localeSchema.optional(),
 });
 
 export const PlayerActionSchema = z.object({
@@ -112,10 +117,17 @@ export const StoryGenerateSchema = z.object({
   hostPrompt: z.string().max(1000),
 });
 
-/** Spectator join — new in Issue #52 */
+/** Spectator join — new in Issue #52
+ *
+ * #58 follow-up: optional `locale` so the server can flatten the
+ * shared history bilingual companion + scenarioTitle into the
+ * spectator's preferred language. Older clients that omit it default
+ * to 'tr' server-side (no behaviour change).
+ */
 export const SpectatorJoinSchema = z.object({
   sessionId,
   role: z.literal('spectator'),
+  locale: localeSchema.optional(),
 });
 
 /* ------------------------------------------------------------------ */

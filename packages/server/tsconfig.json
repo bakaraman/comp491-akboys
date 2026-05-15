@@ -5,7 +5,8 @@
     "outDir": "./dist",
     "paths": {
       "@akboys/shared": ["../shared/src/index.ts"]
-    }
+    },
+    "jsx": "react-jsx"
   },
   "include": ["src"]
 }

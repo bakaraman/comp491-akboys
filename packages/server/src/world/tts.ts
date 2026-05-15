@@ -16,11 +16,10 @@ import { logOpenAIUsage } from '../lib/usage-logger.js';
 const DEBUG = '[tts]';
 
 /**
- * Very explicit voice direction — the secret sauce of gpt-4o-mini-tts.
- * Pushes the model away from a flat, robotic read toward a proper
- * film-voiceover cadence.
+ * Voice direction per locale (#58). Pushes the model away from a flat,
+ * robotic read toward a proper audiobook cadence in each language.
  */
-const DEFAULT_INSTRUCTIONS = `
+const INSTRUCTIONS_TR = `
 Voice: a calm, grounded Turkish narrator — late 30s, warm mid-range baritone, like a seasoned audiobook reader telling a story by a fireside.
 Personality: composed, attentive, quietly engaged with the story. Human, not performative.
 Accent: native Turkish speaker. Pronounce Turkish words with natural stress and ğ, ı, ö, ç, ş, ü naturally.
@@ -29,6 +28,17 @@ Delivery: read as if telling a friend what happened. Clear, matter-of-fact. Let 
 Emotion: present but restrained. Subtle, not overperformed. The text itself is plain, so let it sound plain.
 Texture: warm, clean, conversational. No rasp, no affectation.
 Style: contemporary Turkish narration — think a good podcast host or documentary voice-over, NOT a film-noir caricature.
+`.trim();
+
+const INSTRUCTIONS_EN = `
+Voice: a calm, grounded English narrator — late 30s, authoritative mid-range baritone, like a seasoned audiobook reader telling a story by a fireside.
+Personality: composed, attentive, quietly engaged with the story. Human, not performative.
+Accent: neutral American English. Pronounce Turkish proper-noun names (Şevket, Yıldız, Kadıköy) with natural stress, not anglicised.
+Pacing: steady and natural, ~150-170 words per minute. Let commas breathe. Do not rush, do not drag.
+Delivery: read as if telling a friend what happened. Clear, matter-of-fact. Let the words carry their own weight — no theatrical pauses, no forced gravitas, no melodrama.
+Emotion: present but restrained. Subtle, not overperformed. The text itself is plain, so let it sound plain.
+Texture: warm, clean, conversational. No rasp, no affectation.
+Style: contemporary English narration — think a good podcast host or documentary voice-over, NOT a film-noir caricature.
 `.trim();
 
 /** Voices we allow — all supported by gpt-4o-mini-tts. */
@@ -47,6 +57,8 @@ export type TtsVoice =
 
 export interface TtsOptions {
   text: string;
+  /** #58: player locale; drives default voice + instruction pack. */
+  locale?: 'tr' | 'en';
   voice?: TtsVoice;
   format?: 'wav' | 'mp3' | 'opus' | 'pcm';
   instructions?: string;
@@ -73,15 +85,17 @@ function stripMarkdownForTts(text: string): string {
  * Generate TTS audio. Returns a Response object whose body can be piped.
  */
 export async function streamTts(opts: TtsOptions): Promise<Response> {
-  const voice = opts.voice ?? 'ash';
+  const locale = opts.locale ?? 'tr';
+  const voice = opts.voice ?? (locale === 'en' ? 'onyx' : 'ash');
   const format = opts.format ?? 'mp3';
-  const instructions = opts.instructions ?? DEFAULT_INSTRUCTIONS;
-  // Issue #63: strip markdown BEFORE the API call so it doesn't read
-  // "asterisk" aloud. Frontend still receives the original markdown.
+  // #58: locale-aware instruction pack (TR vs EN).
+  const instructions = opts.instructions ?? (locale === 'en' ? INSTRUCTIONS_EN : INSTRUCTIONS_TR);
+  // #63: strip markdown BEFORE the API call so it doesn't read "asterisk" aloud.
+  // Frontend still receives the original markdown.
   const text = stripMarkdownForTts(opts.text).slice(0, 4000);
   const t0 = Date.now();
 
-  console.log(`${DEBUG} ▶ voice=${voice} format=${format} chars=${opts.text.length} (stripped=${text.length})`);
+  console.log(`${DEBUG} ▶ locale=${locale} voice=${voice} format=${format} chars=${opts.text.length} (stripped=${text.length})`);
 
   try {
     // Some OpenAI SDK versions haven't added `ash`/`ballad`/`fable`/`verse` to the

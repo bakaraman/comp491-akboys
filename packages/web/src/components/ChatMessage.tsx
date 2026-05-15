@@ -12,6 +12,7 @@
 
 import React from 'react';
 import Markdown from 'react-markdown';
+import { useT } from '@/hooks/useLocale';
 
 interface ChatMessageProps {
   role: 'user' | 'assistant' | 'system' | 'observed';
@@ -33,6 +34,7 @@ export function ChatMessage({
   isLoadingImage,
   messageType,
 }: ChatMessageProps) {
+  const T = useT();
   /* ---- C.1: Shared opening narration — distinct style ---- */
   if (messageType === 'global' && role === 'assistant') {
     return (
@@ -47,7 +49,7 @@ export function ChatMessage({
           marginBottom: '8px',
           opacity: 0.7,
         }}>
-          ── Açılış ──
+          {T.game.openingDivider}
         </div>
         <div style={{
           padding: '20px 24px',
@@ -98,7 +100,7 @@ export function ChatMessage({
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
-            Observed
+            {T.game.observedLabel}
           </div>
           <div style={{
             fontSize: '14px', color: '#8a8070',
@@ -173,7 +175,7 @@ export function ChatMessage({
           gap: '6px',
         }}>
           {isNarrator ? (
-            'Narrator'
+            T.game.narratorLabel
           ) : (
             <>
               <span style={{
@@ -183,7 +185,7 @@ export function ChatMessage({
                 backgroundColor: displayColor,
                 display: 'inline-block',
               }} />
-              {playerName || 'Player'}
+              {playerName || T.game.playerLabel}
             </>
           )}
         </div>
@@ -205,7 +207,7 @@ export function ChatMessage({
             fontSize: '12px',
             fontStyle: 'italic',
           }}>
-            Visualizing scene...
+            {T.game.imageLoading}
           </div>
         )}
 

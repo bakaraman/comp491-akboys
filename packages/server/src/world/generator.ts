@@ -54,14 +54,14 @@ RED HERRINGS (REQUIRED — at least 1 per world):
 - The red herring should be physically close to the crime scene or connected to an innocent NPC's hidden secret.
 
 ALIBI RULES (REQUIRED — every NPC must have a complete alibi object):
-- Every NPC must have alibi.claimedLocation and alibi.claimedActivity filled in Turkish.
-- alibi.corroboratedBy: name of an NPC who can confirm it (or null if alone).
-- alibi.inconsistency: CULPRIT ONLY — a specific, player-discoverable contradiction (e.g. "claims to have been in the garden, but the groundskeeper locked the gate at 22:30"). Leave null for innocent NPCs.
-- alibiClaim: a short Turkish summary of the alibi (used in quick references).
+- Every NPC must have alibi.claimedLocation and alibi.claimedActivity filled in BOTH languages.
+- alibi.corroboratedBy: proper-noun name of an NPC who can confirm it (single string, not bilingual), or null if alone.
+- alibi.inconsistency: CULPRIT ONLY — a specific, player-discoverable contradiction in BOTH languages (e.g. {tr:"bahçedeydim diyor ama bahçıvan kapıyı 22:30'da kilitledi", en:"claims to have been in the garden, but the groundskeeper locked the gate at 22:30"}). Leave null for innocent NPCs.
+- alibiClaim: a short summary of the alibi in BOTH languages.
 - Style: NPCs should reveal their alibis under pressure; the alibi must feel personal and drawn from their backstory.
 
 BACKSTORY RULES (REQUIRED — every NPC must have a backstory):
-- Every NPC must have backstory: 2-3 Turkish sentences of personal history.
+- Every NPC must have backstory: 2-3 sentences of personal history in BOTH languages.
 - Each backstory must be distinct enough that the narrator's voice for that character feels different.
 - The backstory should hint at the NPC's personality without directly stating it.
 
@@ -73,16 +73,31 @@ KILLER AMBIGUITY (essential for a good mystery):
 - knownInfo is what the NPC ACTUALLY knows (narrator's eyes only — used to make them lie convincingly).
 - The player should suspect 2-3 NPCs until the narrative deduces the real answer.
 
-LANGUAGE (STRICT):
-- ALL player-facing text MUST be in Turkish: room names + descriptions, NPC names + roles + descriptions, narrativeHooks, openingNarration, alibiClaim, alibi fields, backstory, knownInfo, hiddenSecret, item names + descriptions, solution.motiveShort.
-- Technical IDs (snake_case English): room.id, npc.id, item.id, roomId refs, keyEvidenceId, culpritNpcId.
-- imagePrompt, portraitPrompt, visualStylePrompt, openingImagePrompt: English (for image generation).
+BILINGUAL OUTPUT (STRICT — #58):
+- The same world is played by Turkish-speaking and English-speaking detectives in the SAME session. Every descriptive field must carry BOTH languages.
+- BILINGUAL fields (must be objects with BOTH \`tr\` and \`en\` strings):
+  meta.title, meta.setting, openingNarration,
+  every room.description,
+  every npc.role, npc.description, npc.alibiClaim,
+  every npc.alibi.claimedLocation, npc.alibi.claimedActivity,
+  every npc.alibi.inconsistency (when non-null), npc.backstory, npc.knownInfo,
+  every npc.hiddenSecret (when non-null),
+  every item.description,
+  every entryScenes[].narrativeHook,
+  solution.motiveShort.
+- The English MUST be semantically identical to the Turkish — same details, same names, same tone, same pacing. It is NOT a literal word-for-word translation; rewrite for native English flow.
+- SINGLE-STRING fields — PROPER NOUNS that stay identical across locales:
+  npc.name (e.g. "Doktor Şevket" or "Frank O'Hara"),
+  room.name (e.g. "Eski Saray" or "The Velvet Lounge"),
+  item.name (e.g. "Kibrit Kutusu" or "Bloody Knife"),
+  alibi.corroboratedBy (a name).
+- These proper nouns must be CULTURALLY CONSISTENT with the setting and identical in both languages' output. If the setting is 1925 Istanbul, names are Turkish (Şevket, Hatice, Eski Saray); if the setting is 1948 Los Angeles, names are English (Frank, Eleanor, The Velvet Lounge).
+- Technical IDs (snake_case English): room.id, npc.id, item.id, roomId refs, keyEvidenceId, culpritNpcId. Same in both — these are not displayed.
+- ENGLISH-ONLY (for image generation): imagePrompt, portraitPrompt, visualStylePrompt, openingImagePrompt. These are technical art-direction strings, not player-facing text.
 
-TURKISH STYLE:
-- Clear, direct, natural prose. Short sentences. Normal anlatıcı tonu.
-- NOT ornamental, NOT literary-heavy, NOT Orhan Pamuk. No florid metaphors.
-- Native Turkish, factual, concrete. Every line earns its place.
-- Atmosphere comes from specific DETAILS (burnt coffee smell, a cracked windowpane) — not from poetic language.
+STYLE PER LANGUAGE:
+- Turkish: clear, direct, natural prose. Short sentences. Normal anlatıcı tonu. NOT ornamental, NOT literary-heavy, NOT Orhan Pamuk. Atmosphere comes from specific DETAILS (burnt coffee smell, a cracked windowpane) — not from poetic language.
+- English: same posture — clear, direct, natural prose. Short sentences. Native-quality, not translation-ese. Concrete sensory details over flowery metaphors.
 
 VISUAL STYLE:
 - meta.visualStylePrompt: 1-2 English sentences, concrete art direction.
@@ -90,9 +105,9 @@ VISUAL STYLE:
 - Each npc.portraitPrompt: head-and-shoulders portrait, period-appropriate, matches style.
 
 OPENING NARRATION:
-- 4-6 Turkish sentences. Clear, natural prose. Bake in era + location + mood naturally. Write for the ear — TTS will read it.
+- 4-6 sentences in BOTH languages. Clear, natural prose. Bake in era + location + mood naturally. Write for the ear — TTS will read it in each player's chosen language.
 
-OUTPUT: Single JSON object matching the provided schema exactly.`;
+OUTPUT: Single JSON object matching the provided schema exactly. Every bilingual field must be {tr: "...", en: "..."} — never just one language, never an empty string for the missing locale.`;
 }
 
 function buildStyleAddition(genre: GenreTag): string {
@@ -107,9 +122,9 @@ TONE: Apply this genre's atmosphere to room descriptions, NPC backstories, and o
 function buildUserPrompt(hostPrompt: string, playerCount: number): string {
   const cleaned = hostPrompt.trim();
   if (!cleaned) {
-    return `Create a surprise mystery for ${playerCount} players. Choose any evocative setting and era yourself — 1920s Chicago, 1970s Istanbul, a corporate cyberpunk megacity, a medieval castle feast, a deep-space station, etc. Write everything in clear, direct, natural Turkish prose. Short sentences. No florid metaphors.`;
+    return `Create a surprise mystery for ${playerCount} players. Choose any evocative setting and era yourself — 1920s Chicago, 1970s Istanbul, a corporate cyberpunk megacity, a medieval castle feast, a deep-space station, etc. Produce every descriptive field in BOTH Turkish and English (object form {tr, en}). Proper-noun names stay culturally consistent with the setting and identical across locales.`;
   }
-  return `HOST PROMPT: "${cleaned}"\n\nCreate a mystery for ${playerCount} players based on this theme. Interpret freely but stay true to the prompt. Write everything in clear, direct, natural Turkish prose. Short sentences. No florid metaphors.`;
+  return `HOST PROMPT: "${cleaned}"\n\nCreate a mystery for ${playerCount} players based on this theme. Interpret freely but stay true to the prompt. Produce every descriptive field in BOTH Turkish and English (object form {tr, en}). Proper-noun names stay culturally consistent with the setting and identical across locales.`;
 }
 
 /* ------------------------------------------------------------------ */

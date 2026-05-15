@@ -11,10 +11,11 @@
  * @since 2026-04-17
  */
 
-import type { WorldData } from '@akboys/shared';
-import { openaiStreamClient } from '../lib/openai-client.js';
+import { pickLang } from '@akboys/shared';
+import type { Locale, WorldData } from '@akboys/shared';
+import { openaiClient, openaiStreamClient } from '../lib/openai-client.js';
 import { withOpenAIRetry } from '../lib/openai-retry.js';
-import { logOpenAIUsage } from '../lib/usage-logger.js';
+import { logFromCompletion, logOpenAIUsage } from '../lib/usage-logger.js';
 
 const DEBUG = '[finale]';
 
@@ -31,6 +32,8 @@ export interface GenerateFinaleInput {
   turnCount: number;
   maxTurns: number;
   sessionId?: string;
+  /** #58: player's locale for the streamed finale text. */
+  locale: Locale;
 }
 
 function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: string } {
@@ -44,7 +47,11 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
     worldStateLog,
     turnCount,
     maxTurns,
+    locale,
   } = input;
+
+  const isEn = locale === 'en';
+  const langName = isEn ? 'English' : 'Turkish';
 
   const culprit = world.npcs.find((n) => n.id === world.solution.culpritNpcId);
   const keyEv = world.items.find((i) => i.id === world.solution.keyEvidenceId);
@@ -52,11 +59,11 @@ function buildFinalePrompt(input: GenerateFinaleInput): { system: string; user: 
   const wrongNpc = wrongAccusedNpcId ? world.npcs.find((n) => n.id === wrongAccusedNpcId) : null;
   const evidenceItem = evidencePresentedId ? world.items.find((i) => i.id === evidencePresentedId) : null;
 
-  const system = `You are narrating the FINALE of a mystery. Write in clear, direct, natural Turkish.
+  const system = `You are narrating the FINALE of a mystery. Write in clear, direct, natural ${langName}.
 
-Write EXACTLY 2 short paragraphs. Maximum 150 Turkish words total. Every sentence delivers a fact or beat — no filler, no decoration, no "edebi" heavy style.
+Write EXACTLY 2 short paragraphs. Maximum 150 ${langName} words total. Every sentence delivers a fact or beat — no filler, no decoration, no heavy literary style.
 
-Plain readable prose. Short sentences. Think the matter-of-fact voice of a detective recounting what happened, NOT Orhan Pamuk. Every line should either:
+Plain readable prose. Short sentences. Think the matter-of-fact voice of a detective recounting what happened. Every line should either:
   - Name a specific thing the team found or missed
   - State who did what and why
   - Land a concrete consequence
@@ -66,11 +73,11 @@ Read it aloud in your head — if a sentence sounds ornamental, cut it.
 Do NOT use list items, headers, or markdown. Prose only. Separate the two paragraphs with a single blank line.`;
 
   const truthBlock = `WORLD:
-Title: ${world.meta.title}
-Setting: ${world.meta.setting}
+Title: ${pickLang(world.meta.title, locale)}
+Setting: ${pickLang(world.meta.setting, locale)}
 
-TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (role: ${culprit?.role ?? 'unknown'})
-TRUE MOTIVE: ${world.solution.motiveShort}
+TRUE CULPRIT: ${culprit?.name ?? 'unknown'} (role: ${culprit ? pickLang(culprit.role, locale) : 'unknown'})
+TRUE MOTIVE: ${pickLang(world.solution.motiveShort, locale)}
 KEY EVIDENCE: ${keyEv?.name ?? 'unknown'}`;
 
   const logBlock = worldStateLog.length
@@ -102,7 +109,7 @@ True culprit (never caught): ${culprit?.name}
 Write a defeated, reflective ending. Describe how the case slipped away. The city moved on. The culprit was never caught. Short, elegiac paragraphs.`;
   }
 
-  const user = `${truthBlock}\n\n${logBlock}\n\n${outcomeBlock}\n\nWrite the finale now, in Turkish prose only.`;
+  const user = `${truthBlock}\n\n${logBlock}\n\n${outcomeBlock}\n\nWrite the finale now, in ${langName} prose only.`;
 
   return { system, user };
 }
@@ -112,7 +119,7 @@ Write a defeated, reflective ending. Describe how the case slipped away. The cit
  */
 export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<string> {
   const { system, user } = buildFinalePrompt(input);
-  console.log(`${DEBUG} streaming finale: outcome=${input.outcome}`);
+  console.log(`${DEBUG} streaming finale: outcome=${input.outcome} locale=${input.locale}`);
 
   const FINALE_MODEL = 'gpt-5.4';
   const t0 = Date.now();
@@ -177,4 +184,104 @@ export async function renderFinaleText(input: GenerateFinaleInput): Promise<stri
     full += chunk;
   }
   return full;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Bilingual finale — single LLM call, cached and reused per session  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * #58 follow-up: produce the finale in BOTH languages in a single LLM
+ * call so every client in the same session gets the same beat-for-beat
+ * story flattened into its own locale. Cached on the session — the
+ * second client (and any spectator) hits cache instead of triggering
+ * a parallel OpenAI stream.
+ *
+ * Differs from `streamFinale`/`renderFinaleText` (which are unilingual
+ * streaming) in that callers wait for both languages at once. Client
+ * UX still feels alive because the FinaleCinematic typewriter syncs
+ * with TTS audio, not the LLM stream.
+ */
+export interface GenerateBilingualFinaleInput {
+  world: WorldData;
+  outcome: FinaleOutcome;
+  accuserName?: string;
+  accusedNpcId?: string;
+  wrongAccusedNpcId?: string;
+  evidencePresentedId?: string;
+  worldStateLog: string[];
+  turnCount: number;
+  maxTurns: number;
+  sessionId?: string;
+}
+
+export async function generateBilingualFinale(
+  input: GenerateBilingualFinaleInput,
+): Promise<{ tr: string; en: string; culpritName: string | null }> {
+  const trPrompt = buildFinalePrompt({ ...input, locale: 'tr' });
+  const enPrompt = buildFinalePrompt({ ...input, locale: 'en' });
+
+  const culprit = input.world.npcs.find((n) => n.id === input.world.solution.culpritNpcId);
+  const culpritName = culprit?.name ?? null;
+
+  /* Single combined call: ask the model for both languages in a strict
+   * JSON object. Re-use the per-language prompts so each side stays
+   * fully grounded in its own outcome block. */
+  const system = `You produce the FINALE of a mystery in BOTH Turkish and English in a single JSON object.
+
+The Turkish and English versions must be semantically identical — same beats, same names, same paragraph structure, just two languages. Native flow in each (NOT literal word-for-word translation).
+
+OUTPUT: a strict JSON object: { "tr": "<Turkish finale prose>", "en": "<English finale prose>" }. No commentary, no markdown.
+
+Each language must follow ITS OWN rule pack below.`;
+
+  const user = `### TURKISH RULE PACK
+${trPrompt.system}
+
+### TURKISH PROMPT BODY
+${trPrompt.user}
+
+### ENGLISH RULE PACK
+${enPrompt.system}
+
+### ENGLISH PROMPT BODY
+${enPrompt.user}
+
+Now produce the bilingual JSON now.`;
+
+  const FINALE_MODEL = 'gpt-5.4';
+  console.log(`${DEBUG} bilingual generation start: outcome=${input.outcome}`);
+  const t0 = Date.now();
+
+  const completion = await withOpenAIRetry('finale-bilingual', () =>
+    openaiClient().chat.completions.create({
+      model: FINALE_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_completion_tokens: 3000,
+      reasoning_effort: 'medium',
+      response_format: { type: 'json_object' },
+    }),
+  );
+
+  logFromCompletion(completion, {
+    model: FINALE_MODEL,
+    purpose: 'finale',
+    durationMs: Date.now() - t0,
+    sessionId: input.sessionId,
+    success: true,
+  });
+
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) throw new Error('Bilingual finale returned empty content');
+  const parsed = JSON.parse(raw) as { tr?: string; en?: string };
+  if (typeof parsed.tr !== 'string' || typeof parsed.en !== 'string') {
+    throw new Error('Bilingual finale missing tr/en fields');
+  }
+  console.log(
+    `${DEBUG} bilingual generation ✓ (${Date.now() - t0}ms, tr=${parsed.tr.length}c en=${parsed.en.length}c)`,
+  );
+  return { tr: parsed.tr.trim(), en: parsed.en.trim(), culpritName };
 }

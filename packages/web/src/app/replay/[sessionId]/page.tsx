@@ -7,6 +7,12 @@
  *
  * Issue #52 — spectator mode + finished-session replay
  *
+ * #58 update: types model the bilingual companion shape the server now
+ * returns; render goes through pickLang() so titles, setting, opening
+ * narration, reconstruction events and conclusion appear in the viewer's
+ * locale instead of showing `[object Object]`. All UI chrome strings are
+ * sourced from tr.ts / en.ts.
+ *
  * @author AKBOYS Team
  * @since 2026-05-07
  */
@@ -16,15 +22,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
+import { useLocale, useT } from '@/hooks/useLocale';
+import { pickLang, type Bilingual } from '@/lib/i18n';
+
 const API_BASE = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Wire-level history message. Narrator messages produced after #58 carry
+ * a bilingual companion alongside the legacy single-language slice; older
+ * messages and player actions only have `content`. We honour both shapes.
+ */
 interface HistoryMessage {
   role: string;
+  /** Legacy single-language body. Pre-#58 narrator + every player action. */
   content: string;
+  /** #58: bilingual companion. Present on narrator messages and the shared opening. */
+  bilingualContent?: Bilingual;
   playerId?: string;
   playerName?: string;
   playerColor?: string;
@@ -33,26 +50,40 @@ interface HistoryMessage {
   visibleTo?: string[];
 }
 
+interface ReplayReconstructionEvent {
+  turn: number;
+  time: string;
+  roomId: string;
+  roomName: string;
+  actorNpcId?: string;
+  actorName: string;
+  /** #58: bilingual after the reconstruction rework. */
+  actorRole?: Bilingual;
+  /** #58: bilingual. */
+  description: Bilingual;
+  isCulpritAction: boolean;
+}
+
 interface ReplayData {
   sessionId: string;
   state: string;
   history: HistoryMessage[];
   world: {
-    meta: { title: string; setting: string };
-    openingNarration: string;
+    meta: {
+      /** #58: bilingual. */
+      title: Bilingual;
+      /** #58: bilingual. */
+      setting: Bilingual;
+    };
+    /** #58: bilingual. */
+    openingNarration: Bilingual;
   } | null;
   reconstruction: {
-    title: string;
-    conclusion: string;
-    events: Array<{
-      turn: number;
-      time: string;
-      roomId: string;
-      roomName: string;
-      actorName: string;
-      description: string;
-      isCulpritAction: boolean;
-    }>;
+    /** #58: bilingual. */
+    title: Bilingual;
+    /** #58: bilingual. */
+    conclusion: Bilingual;
+    events: ReplayReconstructionEvent[];
   } | null;
   players: Array<{ id: string; name: string; color: string }>;
   mpTurnCount: number;
@@ -67,21 +98,18 @@ type Speed = (typeof SPEEDS)[number];
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function formatTime(ms: number): string {
+function formatTime(ms: number, locale: 'tr' | 'en'): string {
   const d = new Date(ms);
-  return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString(locale === 'en' ? 'en-US' : 'tr-TR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
-function roleLabel(msg: HistoryMessage): string {
-  if (msg.role === 'assistant') return msg.playerName || 'Anlatıcı';
-  if (msg.role === 'user') return msg.playerName || 'Oyuncu';
-  return 'Sistem';
-}
-
-function roleColor(msg: HistoryMessage): string {
-  if (msg.role === 'assistant') return '#d4a843';
-  if (msg.playerColor) return msg.playerColor;
-  return '#7a6a50';
+function formatDate(ms: number, locale: 'tr' | 'en'): string {
+  const d = new Date(ms);
+  return d.toLocaleDateString(locale === 'en' ? 'en-US' : 'tr-TR');
 }
 
 /* ------------------------------------------------------------------ */
@@ -89,6 +117,8 @@ function roleColor(msg: HistoryMessage): string {
 /* ------------------------------------------------------------------ */
 
 export default function ReplayPage() {
+  const T = useT();
+  const { locale } = useLocale();
   const params = useParams();
   const router = useRouter();
   const sessionId = params?.sessionId as string;
@@ -105,6 +135,33 @@ export default function ReplayPage() {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  /* ---- Locale-aware role label / color helpers (recreated per render). ---- */
+  const roleLabel = useCallback(
+    (msg: HistoryMessage): string => {
+      if (msg.role === 'assistant') return msg.playerName || T.game.narratorLabel;
+      if (msg.role === 'user') return msg.playerName || T.game.playerLabel;
+      return T.replay.systemLabel;
+    },
+    [T],
+  );
+
+  const roleColor = useCallback((msg: HistoryMessage): string => {
+    if (msg.role === 'assistant') return '#d4a843';
+    if (msg.playerColor) return msg.playerColor;
+    return '#7a6a50';
+  }, []);
+
+  /* ---- Render-time helper to pick the right slice of a message. ---- */
+  const renderContent = useCallback(
+    (msg: HistoryMessage): string => {
+      // #58: bilingual companion when present (narrator + opening), else
+      // fall back to the single-language slice (player actions, system).
+      if (msg.bilingualContent) return pickLang(msg.bilingualContent, locale) ?? msg.content;
+      return msg.content;
+    },
+    [locale],
+  );
 
   /* ---- Fetch replay data ---- */
   useEffect(() => {
@@ -179,7 +236,7 @@ export default function ReplayPage() {
   if (loading) return (
     <div style={styles.center}>
       <div style={styles.spinner} />
-      <p style={{ color: '#7a6a50', marginTop: 16 }}>Replay yükleniyor…</p>
+      <p style={{ color: '#7a6a50', marginTop: 16 }}>{T.replay.loadingReplay}</p>
     </div>
   );
 
@@ -187,7 +244,7 @@ export default function ReplayPage() {
     <div style={styles.center}>
       <p style={{ color: '#e07878', fontSize: 15 }}>{error}</p>
       <button onClick={() => router.push('/')} style={styles.btnSecondary}>
-        Ana Sayfaya Dön
+        {T.game.backToHome}
       </button>
     </div>
   );
@@ -198,16 +255,20 @@ export default function ReplayPage() {
   const visibleMessages = data.history.slice(0, cursor + 1);
   const atEnd = cursor >= total - 1;
 
+  /* #58: pickLang on the bilingual world meta + reconstruction title/conclusion. */
+  const worldTitle = data.world ? pickLang(data.world.meta.title, locale) : null;
+  const worldSetting = data.world ? pickLang(data.world.meta.setting, locale) : null;
+
   return (
     <div style={styles.root}>
       {/* ── Header ── */}
       <div style={styles.header}>
         <div>
-          <div style={styles.title}>{data.world?.meta.title || 'Oyun Tekrarı'}</div>
-          <div style={styles.subtitle}>{data.world?.meta.setting || ''}</div>
+          <div style={styles.title}>{worldTitle || T.replay.title}</div>
+          <div style={styles.subtitle}>{worldSetting || ''}</div>
         </div>
         <button onClick={() => router.push('/')} style={styles.btnSecondary}>
-          Ana Sayfa
+          {T.replay.home}
         </button>
       </div>
 
@@ -227,9 +288,9 @@ export default function ReplayPage() {
                   <span style={{ ...styles.msgRole, color: roleColor(msg) }}>
                     {roleLabel(msg)}
                   </span>
-                  <span style={styles.msgTime}>{formatTime(msg.timestamp)}</span>
+                  <span style={styles.msgTime}>{formatTime(msg.timestamp, locale)}</span>
                 </div>
-                <div style={styles.msgContent}>{msg.content}</div>
+                <div style={styles.msgContent}>{renderContent(msg)}</div>
               </div>
             ))}
             <div ref={chatEndRef} />
@@ -241,7 +302,7 @@ export default function ReplayPage() {
             <input
               type="range"
               min={0}
-              max={total - 1}
+              max={Math.max(total - 1, 0)}
               value={cursor}
               onChange={(e) => {
                 stopPlayback();
@@ -250,9 +311,9 @@ export default function ReplayPage() {
               style={styles.scrubber}
             />
             <div style={styles.scrubberLabels}>
-              <span>Mesaj 1</span>
-              <span>{cursor + 1} / {total}</span>
-              <span>Mesaj {total}</span>
+              <span>{T.replay.firstMessage}</span>
+              <span>{T.replay.progress.replace('{n}', String(cursor + 1)).replace('{total}', String(total))}</span>
+              <span>{T.replay.lastMessageOf.replace('{total}', String(total))}</span>
             </div>
 
             {/* Playback buttons */}
@@ -261,14 +322,14 @@ export default function ReplayPage() {
                 onClick={togglePlay}
                 style={{ ...styles.btnPrimary, minWidth: 90 }}
               >
-                {playing ? '⏸ Duraklat' : atEnd ? '↩ Başa Dön' : '▶ Oynat'}
+                {playing ? T.replay.pause : atEnd ? T.replay.restart : T.replay.play}
               </button>
               {atEnd && (
                 <button
                   onClick={() => { stopPlayback(); setCursor(0); }}
                   style={styles.btnSecondary}
                 >
-                  ↩ Baştan
+                  {T.replay.fromStart}
                 </button>
               )}
               {SPEEDS.map((s) => (
@@ -293,7 +354,7 @@ export default function ReplayPage() {
         <div style={styles.sideColumn}>
           {/* Players */}
           <div style={styles.card}>
-            <div style={styles.cardTitle}>Oyuncular</div>
+            <div style={styles.cardTitle}>{T.replay.playersTitle}</div>
             {data.players.map((p) => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: p.color, flexShrink: 0 }} />
@@ -304,46 +365,51 @@ export default function ReplayPage() {
 
           {/* Stats */}
           <div style={styles.card}>
-            <div style={styles.cardTitle}>Oyun Bilgisi</div>
-            <div style={styles.statRow}><span>Toplam tur</span><span>{data.mpTurnCount}</span></div>
-            <div style={styles.statRow}><span>Mesaj sayısı</span><span>{total}</span></div>
+            <div style={styles.cardTitle}>{T.replay.infoTitle}</div>
+            <div style={styles.statRow}><span>{T.replay.totalTurns}</span><span>{data.mpTurnCount}</span></div>
+            <div style={styles.statRow}><span>{T.replay.messageCount}</span><span>{total}</span></div>
             <div style={styles.statRow}>
-              <span>Oynandı</span>
-              <span>{new Date(data.createdAt).toLocaleDateString('tr-TR')}</span>
+              <span>{T.replay.playedOn}</span>
+              <span>{formatDate(data.createdAt, locale)}</span>
             </div>
           </div>
 
           {/* Reconstruction */}
           {data.reconstruction && (
             <div style={styles.card}>
-              <div style={styles.cardTitle}>Gerçekte Ne Oldu</div>
+              <div style={styles.cardTitle}>{T.replay.revealTitle}</div>
               {!showReconstruction ? (
                 <button
                   onClick={() => setShowReconstruction(true)}
                   style={styles.btnPrimary}
                 >
-                  Olay Zincirini Göster
+                  {T.replay.showTimeline}
                 </button>
               ) : (
                 <>
-                  {data.reconstruction.events.map((ev, i) => (
-                    <div key={i} style={{
-                      marginBottom: 12,
-                      paddingLeft: 10,
-                      borderLeft: ev.isCulpritAction ? '2px solid #cf5b5b' : '2px solid #2a2520',
-                    }}>
-                      <div style={{ fontSize: 11, color: '#5a5040', marginBottom: 2 }}>
-                        {ev.time} — {ev.roomName}
+                  {data.reconstruction.events.map((ev, i) => {
+                    const description = pickLang(ev.description, locale);
+                    return (
+                      <div key={i} style={{
+                        marginBottom: 12,
+                        paddingLeft: 10,
+                        borderLeft: ev.isCulpritAction ? '2px solid #cf5b5b' : '2px solid #2a2520',
+                      }}>
+                        <div style={{ fontSize: 11, color: '#5a5040', marginBottom: 2 }}>
+                          {ev.time} — {ev.roomName}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#c8b89a' }}>
+                          {ev.actorName && <strong style={{ color: ev.isCulpritAction ? '#cf5b5b' : '#d4a843' }}>{ev.actorName}: </strong>}
+                          {description}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#c8b89a' }}>
-                        {ev.actorName && <strong style={{ color: ev.isCulpritAction ? '#cf5b5b' : '#d4a843' }}>{ev.actorName}: </strong>}
-                        {ev.description}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div style={{ marginTop: 12, padding: '10px', backgroundColor: '#0f0f0f', borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: '#7a6a50', marginBottom: 4 }}>Sonuç</div>
-                    <div style={{ fontSize: 13, color: '#c8b89a' }}>{data.reconstruction.conclusion}</div>
+                    <div style={{ fontSize: 11, color: '#7a6a50', marginBottom: 4 }}>{T.replay.conclusionTitle}</div>
+                    <div style={{ fontSize: 13, color: '#c8b89a' }}>
+                      {pickLang(data.reconstruction.conclusion, locale)}
+                    </div>
                   </div>
                 </>
               )}
