@@ -13,6 +13,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocale, useT } from '@/hooks/useLocale';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { getAuthHeaders } from '@/lib/firebase';
 import { ReconstructionReplay } from './ReconstructionReplay';
 
@@ -39,6 +40,7 @@ export function FinaleCinematic({
 }: FinaleCinematicProps) {
   const T = useT();
   const { locale } = useLocale();
+  const isMobile = useIsMobile();
   const [fullText, setFullText] = useState('');
   const [streamDone, setStreamDone] = useState(false);
   const [visibleChars, setVisibleChars] = useState(0);
@@ -252,7 +254,7 @@ export function FinaleCinematic({
         justifyContent: 'center',
         zIndex: 80,
         overflow: 'auto',
-        padding: '32px',
+        padding: 'clamp(16px, 4vw, 32px)',
       }}
     >
       <div style={{ maxWidth: '680px', width: '100%', textAlign: 'center' }}>
@@ -261,8 +263,8 @@ export function FinaleCinematic({
             color: isWin ? '#d4a843' : '#d46868',
             fontFamily: 'Georgia, serif',
             fontStyle: 'italic',
-            fontSize: '42px',
-            marginBottom: '28px',
+            fontSize: 'clamp(28px, 7vw, 42px)',
+            marginBottom: 'clamp(18px, 4vw, 28px)',
             animation: 'fadeInUp 0.9s ease',
           }}
         >
@@ -273,12 +275,12 @@ export function FinaleCinematic({
           style={{
             color: '#e8e0d4',
             fontFamily: 'Georgia, serif',
-            fontSize: '18px',
+            fontSize: 'clamp(15px, 4vw, 18px)',
             lineHeight: '1.85',
             whiteSpace: 'pre-wrap',
             textAlign: 'left',
             minHeight: '180px',
-            marginBottom: '28px',
+            marginBottom: 'clamp(18px, 4vw, 28px)',
           }}
         >
           {shown || (
@@ -323,6 +325,8 @@ export function FinaleCinematic({
               gap: '12px',
               justifyContent: 'center',
               flexWrap: 'wrap',
+              flexDirection: isMobile ? 'column' : 'row',
+              alignItems: isMobile ? 'stretch' : 'center',
               animation: 'fadeInUp 0.6s ease',
             }}
           >

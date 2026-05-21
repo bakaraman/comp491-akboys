@@ -53,14 +53,18 @@ export function NamePopup({ currentName, onSave, onClose, isEdit }: NamePopupPro
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 80,
       animation: 'fadeIn 0.25s ease',
+      /* Keyboard-aware: lets the wrapper scroll when iOS keyboard pushes
+       * the centered card off-viewport. */
+      overflowY: 'auto',
+      padding: '16px',
     }}>
       <div
         style={{
-          width: '400px', maxWidth: '90vw',
+          width: '400px', maxWidth: '100%',
           backgroundColor: '#111',
           border: '1px solid #2a2520',
           borderRadius: '16px',
-          padding: '36px',
+          padding: 'clamp(22px, 5vw, 36px)',
           textAlign: 'center',
           animation: 'scaleIn 0.25s ease',
         }}

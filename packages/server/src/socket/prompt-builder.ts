@@ -12,10 +12,22 @@
  * @since 2026-03-23
  */
 
-import type { Scenario, PlayerAction, WorldStateEvent, WorldData } from '@akboys/shared';
+import type { Scenario, PlayerAction, WorldStateEvent, WorldData, BilingualString } from '@akboys/shared';
 import type { SessionData } from '../store/SessionStore.js';
 import type { SceneContext } from '../middleware/openai.js';
 import { getStyleGuide } from '../world/genre-style.js';
+
+/**
+ * Format a BilingualString for narrator-context prompts. The LLM produces
+ * bilingual JSON output, so it needs both TR and EN of every descriptive
+ * field. Plain template-literal interpolation of a bilingual object yields
+ * "[object Object]" — which the model has been known to copy into the
+ * narrator text. Always route bilingual fields through this helper.
+ */
+function bi(value: BilingualString | null | undefined): string {
+  if (!value) return '';
+  return `tr="${value.tr}" | en="${value.en}"`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Directive types                                                    */
@@ -105,18 +117,18 @@ export function buildPlayerActionPrompt(
       }
       const culpritFlag = w.isCulprit ? ' [CULPRIT — NEVER confess this, play innocent]' : '';
       const lines = [
-        `- ${n.name} (${n.id}, in ${w.roomId}) role=${w.role} mood=${w.personality}${culpritFlag}`,
-        `    description: ${w.description}`,
-        `    backstory: ${w.backstory}`,
-        `    alibi location: "${w.alibi.claimedLocation}"`,
-        `    alibi activity: "${w.alibi.claimedActivity}"`,
-        `    alibi short: "${w.alibiClaim}"`,
-        `    what they ACTUALLY know (hide unless pressed hard): ${w.knownInfo}`,
+        `- ${n.name} (${n.id}, in ${w.roomId}) role=[${bi(w.role)}] mood=${w.personality}${culpritFlag}`,
+        `    description: ${bi(w.description)}`,
+        `    backstory: ${bi(w.backstory)}`,
+        `    alibi location: [${bi(w.alibi.claimedLocation)}]`,
+        `    alibi activity: [${bi(w.alibi.claimedActivity)}]`,
+        `    alibi short: [${bi(w.alibiClaim)}]`,
+        `    what they ACTUALLY know (hide unless pressed hard): ${bi(w.knownInfo)}`,
       ];
       if (w.alibi.inconsistency) {
-        lines.push(`    alibi inconsistency [culprit flaw, never reveal directly]: ${w.alibi.inconsistency}`);
+        lines.push(`    alibi inconsistency [culprit flaw, never reveal directly]: ${bi(w.alibi.inconsistency)}`);
       }
-      if (w.hiddenSecret) lines.push(`    their hidden secret: ${w.hiddenSecret}`);
+      if (w.hiddenSecret) lines.push(`    their hidden secret: ${bi(w.hiddenSecret)}`);
       return lines.join('\n');
     })
     .join('\n\n');

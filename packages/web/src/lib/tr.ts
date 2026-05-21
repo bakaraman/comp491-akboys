@@ -126,6 +126,11 @@ export const T = {
     spectatorFooter: '👁 İzleyici modunda — sadece okuyabilirsiniz',
     queueYouBadge: 'SEN',
     chatInputBlocked: 'Anlatıcı yanıtlıyor…',
+    /* Mobile voice push-to-talk button (#mobile) */
+    voiceButtonHoldToTalk: 'Konuşmak için basılı tut',
+    voiceButtonHoldShort: 'TUT',
+    voiceButtonOn: 'YAYIN',
+    voiceButtonDisabled: 'MİK',
   },
 
   minimap: {
@@ -134,6 +139,31 @@ export const T = {
     unknownRoom: 'Bilinmeyen oda',
     visited: 'Ziyaret edildi',
     unvisited: 'Henüz gidilmedi',
+    /* GameMap modal (#mobile-i18n) */
+    discovered: 'Keşfedildi',
+    mapNotAvailable: 'Harita kullanılamıyor.',
+    legendYou: 'Sen',
+    legendVisited: 'Gezildi',
+    legendUnknown: 'Bilinmeyen',
+    travelHint: 'Komşu bir odaya gitmek için tıkla',
+    teamHeader: 'EKİP',
+    teamCount: '{n} Dedektif',
+    youSuffix: '(sen)',
+    locationUnknown: 'Bilinmeyen',
+    teammateLocationHint: 'Takım üyelerinin konumu sadece gittiğin odalarda görünür.',
+    /* Theme titles + subtitles — translated for TR mode (#mobile-i18n) */
+    themeTitleNoir: 'Vaka Delil Panosu',
+    themeSubtitleNoir: 'Gizli — Chicago Polisi',
+    themeTitleHaunted: 'Malikanenin Kat Planı',
+    themeSubtitleHaunted: 'MCMLXXVII Yılında Ölçülmüştür',
+    themeTitleSpace: 'Sıfır İstasyon // Şema',
+    themeSubtitleSpace: 'SEC-01 / GÜVERTE-A / REV 7.2',
+    themeTitlePirate: 'Kızıl Med — Harita',
+    themeSubtitlePirate: 'Aha, X Hazinenin Yerini Gösterir',
+    themeTitleWestern: 'Toz ve Kül — Kasaba Planı',
+    themeSubtitleWestern: 'Sınır Bölgesi Ölçümü, Bin Sekiz Yüz Yetmiş',
+    themeTitleCyberpunk: 'NEON HAYALETLER // GRID-07',
+    themeSubtitleCyberpunk: '// 2087.04.08 :: SKTR-7 :: AKTİF',
   },
 
   comm: {

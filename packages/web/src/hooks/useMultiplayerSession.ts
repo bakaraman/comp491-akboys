@@ -470,7 +470,7 @@ export function useMultiplayerSession(sessionId: string, enabled: boolean = true
     });
 
     socket.on('story:ready', (data) => {
-      console.log(`[session] story:ready title="${data.world.title}" rooms=${data.rooms.length} npcs=${data.npcs.length} image=${data.openingImageUrl ? 'yes' : 'pending'}`);
+      console.log(`[session] story:ready title="${pickLang(data.world.title, locale)}" rooms=${data.rooms.length} npcs=${data.npcs.length} image=${data.openingImageUrl ? 'yes' : 'pending'}`);
       setWorldMeta({
         title: data.world.title,
         setting: data.world.setting,

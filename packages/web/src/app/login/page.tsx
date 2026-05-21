@@ -41,7 +41,8 @@ export default function LoginPage() {
   if (!authEnabled()) {
     return (
       <div style={{
-        height: '100vh',
+        height: '100dvh',
+        minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -67,9 +68,9 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      height: '100vh', display: 'flex', flexDirection: 'column',
+      minHeight: '100dvh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      backgroundColor: '#0a0a0a', padding: '24px',
+      backgroundColor: '#0a0a0a', padding: 'clamp(12px, 4vw, 24px)',
     }}>
       <div style={{ textAlign: 'center', maxWidth: '420px', width: '100%' }}>
         <h1 style={{

@@ -11,7 +11,7 @@
  */
 
 import { zodResponseFormat } from 'openai/helpers/zod.mjs';
-import { WorldSchema, type WorldData, getFallbackWorld } from '@akboys/shared';
+import { WorldSchema, type WorldData, getFallbackWorld, pickLang } from '@akboys/shared';
 import { detectGenre, getStyleGuide, type GenreTag } from './genre-style.js';
 import { openaiClient } from '../lib/openai-client.js';
 import { withOpenAIRetry } from '../lib/openai-retry.js';
@@ -23,6 +23,18 @@ const MODEL = 'gpt-5.4';
 // we cast at the call site.
 const REASONING_EFFORT = 'none';
 const MAX_TOKENS = 8000;
+
+/**
+ * World generation runs a single big structured-output call against gpt-5.4
+ * with a bilingual {tr, en} schema. The response can comfortably reach
+ * 5000+ tokens (rooms × NPCs × items × 2 languages, plus alibis,
+ * backstories, hidden secrets) and routinely takes 60-90s on real load —
+ * which collides with the shared OpenAI client's 60s default timeout. We
+ * override per-request to 180s so a legitimate slow generation finishes
+ * instead of getting retried and ultimately dropping to the Velvet Shadow
+ * fallback world.
+ */
+const WORLDGEN_TIMEOUT_MS = 180_000;
 
 const DEBUG = '[world-gen]';
 
@@ -286,16 +298,22 @@ async function callOpenAIOnce(
   const t0 = Date.now();
   console.log(`${DEBUG} OpenAI call ▶ model=${MODEL} promptLen=${systemPrompt.length + userPrompt.length}`);
   const completion = await withOpenAIRetry('worldgen', () =>
-    openaiClient().beta.chat.completions.parse({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: zodResponseFormat(WorldSchema, 'noir_world'),
-      max_completion_tokens: MAX_TOKENS,
-      reasoning_effort: REASONING_EFFORT as 'low',
-    }),
+    openaiClient().beta.chat.completions.parse(
+      {
+        model: MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: zodResponseFormat(WorldSchema, 'noir_world'),
+        max_completion_tokens: MAX_TOKENS,
+        reasoning_effort: REASONING_EFFORT as 'low',
+      },
+      // Per-request timeout override: bilingual world gen routinely needs
+      // more than the shared client's 60s default (see WORLDGEN_TIMEOUT_MS
+      // comment at the top of this file).
+      { timeout: WORLDGEN_TIMEOUT_MS },
+    ),
   );
   console.log(`${DEBUG} OpenAI call ✓ (${Date.now() - t0}ms)`);
   logFromCompletion(completion, {
@@ -318,7 +336,7 @@ async function callOpenAIOnce(
     throw new Error('No parsed content');
   }
   const world = normalizeWorld(msg.parsed as WorldData);
-  console.log(`${DEBUG}   parsed: title="${world.meta.title}" rooms=${world.rooms.length} npcs=${world.npcs.length} items=${world.items.length} entryScenes=${world.entryScenes.length}`);
+  console.log(`${DEBUG}   parsed: title="${pickLang(world.meta.title, 'tr')}" rooms=${world.rooms.length} npcs=${world.npcs.length} items=${world.items.length} entryScenes=${world.entryScenes.length}`);
   return world;
 }
 

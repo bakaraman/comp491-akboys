@@ -13,6 +13,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { MAP_LAYOUTS, type ScenarioMapLayout, type RoomPosition } from '@/lib/map-layouts';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useT } from '@/hooks/useLocale';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -168,8 +170,9 @@ function computeAutoLayout(rooms: MapRoom[]): ScenarioMapLayout | undefined {
 /* ------------------------------------------------------------------ */
 
 interface Theme {
-  title: string;
-  subtitle: string;
+  /* title / subtitle are looked up via T.minimap.themeTitle<Key> at render
+   * time so they can be localized. Kept off Theme to keep the type a pure
+   * visual descriptor. */
   panelBg: string;
   headerBg: string;
   footerBg: string;
@@ -183,8 +186,6 @@ interface Theme {
 
 const THEMES: Record<ThemeKey, Theme> = {
   noir: {
-    title: 'Case Evidence Board',
-    subtitle: 'Classified — Chicago P.D.',
     panelBg: '#1a130a',
     headerBg: '#0f0a05',
     footerBg: '#0a0704',
@@ -196,8 +197,6 @@ const THEMES: Record<ThemeKey, Theme> = {
     bodyFont: `'Special Elite', 'Courier New', monospace`,
   },
   haunted: {
-    title: 'The Manor Floor Plan',
-    subtitle: 'Surveyed MCMLXXVII',
     panelBg: '#0a0710',
     headerBg: '#06040a',
     footerBg: '#040308',
@@ -209,8 +208,6 @@ const THEMES: Record<ThemeKey, Theme> = {
     bodyFont: `'Cinzel', 'Georgia', serif`,
   },
   space: {
-    title: 'Station Zero // Schematic',
-    subtitle: 'SEC-01 / DECK-A / REV 7.2',
     panelBg: '#050810',
     headerBg: '#030508',
     footerBg: '#020406',
@@ -222,8 +219,6 @@ const THEMES: Record<ThemeKey, Theme> = {
     bodyFont: `'Orbitron', 'Arial', sans-serif`,
   },
   pirate: {
-    title: 'The Crimson Tide — Chart',
-    subtitle: 'Aye, X Marks the Spot',
     panelBg: '#1a1206',
     headerBg: '#100a04',
     footerBg: '#0a0602',
@@ -235,8 +230,6 @@ const THEMES: Record<ThemeKey, Theme> = {
     bodyFont: `'IM Fell English', 'Georgia', serif`,
   },
   western: {
-    title: 'Dust & Ashes — Town Plan',
-    subtitle: 'Frontier Survey, Eighteen-Seventy',
     panelBg: '#1a1408',
     headerBg: '#100a05',
     footerBg: '#0a0603',
@@ -248,8 +241,6 @@ const THEMES: Record<ThemeKey, Theme> = {
     bodyFont: `'IM Fell English', 'Georgia', serif`,
   },
   cyberpunk: {
-    title: 'NEON GHOSTS // GRID-07',
-    subtitle: '// 2087.04.08 :: SCTR-7 :: ACTIVE',
     panelBg: '#080410',
     headerBg: '#060208',
     footerBg: '#040106',
@@ -260,6 +251,16 @@ const THEMES: Record<ThemeKey, Theme> = {
     titleFont: `'Audiowide', 'Arial', sans-serif`,
     bodyFont: `'Orbitron', 'Arial', sans-serif`,
   },
+};
+
+/* Theme key → i18n lookup pair (title + subtitle key into T.minimap). */
+const THEME_I18N: Record<ThemeKey, { titleKey: string; subtitleKey: string }> = {
+  noir:      { titleKey: 'themeTitleNoir',      subtitleKey: 'themeSubtitleNoir' },
+  haunted:   { titleKey: 'themeTitleHaunted',   subtitleKey: 'themeSubtitleHaunted' },
+  space:     { titleKey: 'themeTitleSpace',     subtitleKey: 'themeSubtitleSpace' },
+  pirate:    { titleKey: 'themeTitlePirate',    subtitleKey: 'themeSubtitlePirate' },
+  western:   { titleKey: 'themeTitleWestern',   subtitleKey: 'themeSubtitleWestern' },
+  cyberpunk: { titleKey: 'themeTitleCyberpunk', subtitleKey: 'themeSubtitleCyberpunk' },
 };
 
 /* ------------------------------------------------------------------ */
@@ -324,6 +325,8 @@ export function GameMap({
 }: GameMapProps) {
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
   const [traveling, setTraveling] = useState<string | null>(null);
+  const isMobile = useIsMobile();
+  const T = useT();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -347,6 +350,13 @@ export function GameMap({
   const layout: ScenarioMapLayout | undefined = MAP_LAYOUTS[scenarioId] || autoLayout;
   const themeKey = resolveTheme(scenarioId);
   const theme = THEMES[themeKey];
+  /* Theme title/subtitle are looked up here so the modal respects the
+   * player's locale. The Theme object itself stays language-agnostic. */
+  const themeI18n = THEME_I18N[themeKey];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const themeTitle = (T.minimap as any)[themeI18n.titleKey] as string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const themeSubtitle = (T.minimap as any)[themeI18n.subtitleKey] as string;
 
   const currentRoom = rooms.find((r) => r.id === currentRoomId);
   const adjacentIds = useMemo(() => {
@@ -416,19 +426,38 @@ export function GameMap({
       <div onClick={onClose} style={backdropStyle} />
       <div style={{
         ...panelStyle,
-        width: mode === 'multiplayer' ? '78%' : '68%',
-        maxWidth: mode === 'multiplayer' ? '1100px' : '900px',
+        /* Mobile: full-screen drawer (100vw, no minWidth). Desktop: percent-
+         * based slide-in from right (unchanged). */
+        width: isMobile ? '100vw' : (mode === 'multiplayer' ? '78%' : '68%'),
+        maxWidth: isMobile ? '100vw' : (mode === 'multiplayer' ? '1100px' : '900px'),
+        minWidth: isMobile ? '100vw' : panelStyle.minWidth,
         backgroundColor: theme.panelBg, fontFamily: theme.bodyFont,
       }}>
-        <Header theme={theme} onClose={onClose} visitedCount={visitedRooms.length} totalCount={rooms.length} />
+        <Header
+          theme={theme}
+          themeTitle={themeTitle}
+          themeSubtitle={themeSubtitle}
+          discoveredLabel={T.minimap.discovered}
+          onClose={onClose}
+          visitedCount={visitedRooms.length}
+          totalCount={rooms.length}
+        />
 
-        {/* Main area: map + (optional) team sidebar */}
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Main area: map + (optional) team sidebar.
+         * Mobile: stack vertically — map on top (full width), team band
+         *   below. Map gets enough vertical room to actually be readable.
+         * Desktop: row layout (unchanged). */}
+        <div style={{
+          flex: 1, display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          overflow: 'hidden',
+        }}>
           {/* Map canvas */}
           <div style={{
             flex: 1, overflow: 'hidden',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '12px 16px',
+            padding: isMobile ? '8px' : '12px 16px',
+            minHeight: 0,
           }}>
             {layout ? (
               <svg
@@ -505,7 +534,7 @@ export function GameMap({
               </svg>
             ) : (
               <div style={{ color: theme.mutedText, fontFamily: theme.bodyFont, fontStyle: 'italic' }}>
-                Map not available.
+                {T.minimap.mapNotAvailable}
               </div>
             )}
           </div>
@@ -520,12 +549,14 @@ export function GameMap({
               currentRoomId={currentRoomId}
               myName={myName}
               myColor={myColor}
+              isMobile={isMobile}
+              t={T.minimap}
             />
           )}
         </div>
 
         {/* Footer */}
-        <Footer theme={theme} />
+        <Footer theme={theme} t={T.minimap} />
       </div>
     </>
   );
@@ -536,34 +567,39 @@ export function GameMap({
 /* ================================================================== */
 
 function Header({
-  theme, onClose, visitedCount, totalCount,
+  theme, themeTitle, themeSubtitle, discoveredLabel, onClose, visitedCount, totalCount,
 }: {
   theme: Theme;
+  themeTitle: string;
+  themeSubtitle: string;
+  discoveredLabel: string;
   onClose: () => void;
   visitedCount: number;
   totalCount: number;
 }) {
   return (
     <div style={{
-      padding: '22px 28px 18px',
+      padding: 'clamp(14px, 4vw, 22px) clamp(16px, 4vw, 28px) clamp(12px, 3vw, 18px)',
       borderBottom: `1px solid ${theme.borderColor}`,
       backgroundColor: theme.headerBg,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+      gap: '12px',
     }}>
-      <div>
+      <div style={{ minWidth: 0, flex: 1 }}>
         <h2 style={{
-          margin: 0, fontSize: '22px', color: theme.accent,
+          margin: 0, fontSize: 'clamp(16px, 5vw, 22px)', color: theme.accent,
           fontFamily: theme.titleFont, fontWeight: 'normal',
           letterSpacing: '1px',
           textShadow: `0 0 20px ${theme.accent}33`,
+          overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
-          {theme.title}
+          {themeTitle}
         </h2>
         <p style={{
           margin: '6px 0 0', fontSize: '10px', color: theme.mutedText,
           fontFamily: theme.bodyFont, letterSpacing: '2px', textTransform: 'uppercase',
         }}>
-          {theme.subtitle} &nbsp;&middot;&nbsp; {visitedCount}/{totalCount} Discovered
+          {themeSubtitle} &nbsp;&middot;&nbsp; {visitedCount}/{totalCount} {discoveredLabel}
         </p>
       </div>
       <button
@@ -583,13 +619,13 @@ function Header({
   );
 }
 
-function Footer({ theme }: { theme: Theme }) {
+function Footer({ theme, t }: { theme: Theme; t: MinimapT }) {
   return (
     <div style={{
-      padding: '12px 28px',
+      padding: 'clamp(10px, 3vw, 12px) clamp(14px, 4vw, 28px)',
       borderTop: `1px solid ${theme.borderColor}`,
       backgroundColor: theme.footerBg,
-      display: 'flex', gap: '20px', flexWrap: 'wrap',
+      display: 'flex', gap: 'clamp(10px, 3vw, 20px)', flexWrap: 'wrap',
       fontSize: '10px', fontFamily: theme.bodyFont,
       color: theme.mutedText, letterSpacing: '1.5px', textTransform: 'uppercase',
     }}>
@@ -599,33 +635,49 @@ function Footer({ theme }: { theme: Theme }) {
             <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
           </circle>
         </svg>
-        You
+        {t.legendYou}
       </span>
       <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <svg width="12" height="12" viewBox="0 0 12 12">
           <rect x="1" y="1" width="10" height="10" rx="2" fill={theme.accent} opacity="0.25" stroke={theme.accent} strokeWidth="1.2" />
         </svg>
-        Visited
+        {t.legendVisited}
       </span>
       <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <svg width="12" height="12" viewBox="0 0 12 12">
           <rect x="1" y="1" width="10" height="10" rx="2" fill="none" stroke={theme.mutedText} strokeWidth="1.2" strokeDasharray="2 2" opacity="0.5" />
         </svg>
-        Unknown
+        {t.legendUnknown}
       </span>
       <span style={{ marginLeft: 'auto', color: theme.mutedText, fontStyle: 'italic', textTransform: 'none', letterSpacing: '0.5px' }}>
-        Click an adjacent node to travel
+        {t.travelHint}
       </span>
     </div>
   );
 }
+
+/* MinimapT — i18n slice we forward into the subcomponents. Sourced from
+ * T.minimap (see lib/tr.ts / lib/en.ts). */
+type MinimapT = {
+  discovered: string;
+  mapNotAvailable: string;
+  legendYou: string;
+  legendVisited: string;
+  legendUnknown: string;
+  travelHint: string;
+  teamHeader: string;
+  teamCount: string;
+  youSuffix: string;
+  locationUnknown: string;
+  teammateLocationHint: string;
+};
 
 /* ================================================================== */
 /*  TEAM SIDEBAR (MP only)                                             */
 /* ================================================================== */
 
 function TeamSidebar({
-  theme, teammates, rooms, visitedRooms, currentRoomId, myName, myColor,
+  theme, teammates, rooms, visitedRooms, currentRoomId, myName, myColor, isMobile, t,
 }: {
   theme: Theme;
   teammates: MapTeammate[];
@@ -634,6 +686,8 @@ function TeamSidebar({
   currentRoomId: string;
   myName?: string;
   myColor?: string;
+  isMobile: boolean;
+  t: MinimapT;
 }) {
   const roomNameMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -646,11 +700,17 @@ function TeamSidebar({
 
   return (
     <div style={{
-      width: '220px',
-      borderLeft: `1px solid ${theme.borderColor}`,
+      /* Mobile: short bottom band so the SVG map keeps the lion's share
+       * of the screen. Desktop: vertical sidebar on the right (unchanged
+       * 220px width). */
+      width: isMobile ? '100%' : '220px',
+      maxHeight: isMobile ? '40%' : undefined,
+      borderLeft: isMobile ? 'none' : `1px solid ${theme.borderColor}`,
+      borderTop: isMobile ? `1px solid ${theme.borderColor}` : 'none',
       backgroundColor: theme.headerBg,
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden',
+      flexShrink: 0,
     }}>
       {/* Sidebar header */}
       <div style={{
@@ -661,14 +721,14 @@ function TeamSidebar({
           fontSize: '11px', color: theme.mutedText,
           fontFamily: 'monospace', letterSpacing: '2px', textTransform: 'uppercase',
         }}>
-          Team
+          {t.teamHeader}
         </div>
         <div style={{
           fontSize: '13px', color: theme.accent,
           fontFamily: theme.titleFont, marginTop: '2px',
           letterSpacing: '1px',
         }}>
-          {teammates.length + 1} Detectives
+          {t.teamCount.replace('{n}', String(teammates.length + 1))}
         </div>
       </div>
 
@@ -677,6 +737,7 @@ function TeamSidebar({
         flex: 1, overflowY: 'auto',
         padding: '12px 10px',
         display: 'flex', flexDirection: 'column', gap: '8px',
+        WebkitOverflowScrolling: 'touch',
       }}>
         {/* Me first */}
         {myName && (
@@ -687,21 +748,25 @@ function TeamSidebar({
             locationLabel={myRoomName}
             isConnected={true}
             isSelf={true}
+            youSuffixLabel={t.youSuffix}
+            unknownLocationLabel={t.locationUnknown}
           />
         )}
 
         {/* Other teammates */}
-        {teammates.map((t) => {
-          const visible = visitedSet.has(t.currentRoomId);
+        {teammates.map((tm) => {
+          const visible = visitedSet.has(tm.currentRoomId);
           return (
             <TeamMemberRow
-              key={t.id}
+              key={tm.id}
               theme={theme}
-              name={t.name}
-              color={t.color}
-              locationLabel={visible ? (roomNameMap[t.currentRoomId] || t.currentRoomId) : 'Unknown'}
+              name={tm.name}
+              color={tm.color}
+              locationLabel={visible ? (roomNameMap[tm.currentRoomId] || tm.currentRoomId) : t.locationUnknown}
               locationUnknown={!visible}
-              isConnected={t.isConnected}
+              isConnected={tm.isConnected}
+              youSuffixLabel={t.youSuffix}
+              unknownLocationLabel={t.locationUnknown}
             />
           );
         })}
@@ -715,7 +780,7 @@ function TeamSidebar({
         fontFamily: theme.bodyFont, fontStyle: 'italic',
         opacity: 0.75, lineHeight: '1.5',
       }}>
-        Teammate locations only visible in rooms you've explored.
+        {t.teammateLocationHint}
       </div>
     </div>
   );
@@ -723,6 +788,7 @@ function TeamSidebar({
 
 function TeamMemberRow({
   theme, name, color, locationLabel, locationUnknown = false, isConnected, isSelf = false,
+  youSuffixLabel, unknownLocationLabel,
 }: {
   theme: Theme;
   name: string;
@@ -731,6 +797,8 @@ function TeamMemberRow({
   locationUnknown?: boolean;
   isConnected: boolean;
   isSelf?: boolean;
+  youSuffixLabel: string;
+  unknownLocationLabel: string;
 }) {
   return (
     <div style={{
@@ -773,7 +841,7 @@ function TeamMemberRow({
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {name}
-          {isSelf && <span style={{ fontSize: '9px', color: theme.mutedText, marginLeft: '6px', fontWeight: 'normal' }}>(you)</span>}
+          {isSelf && <span style={{ fontSize: '9px', color: theme.mutedText, marginLeft: '6px', fontWeight: 'normal' }}>{youSuffixLabel}</span>}
         </div>
         <div style={{
           fontSize: '10px', color: theme.mutedText,
@@ -783,7 +851,7 @@ function TeamMemberRow({
           opacity: locationUnknown ? 0.6 : 0.9,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {locationUnknown ? '\u2753 Unknown' : locationLabel}
+          {locationUnknown ? `\u2753 ${unknownLocationLabel}` : locationLabel}
         </div>
       </div>
     </div>

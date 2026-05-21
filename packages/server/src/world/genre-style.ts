@@ -272,8 +272,11 @@ async function llmDetect(prompt: string): Promise<GenreTag> {
           content: `Theme: "${prompt}"`,
         },
       ],
-      max_tokens: 20,
-      temperature: 0,
+      // gpt-5.x family rejects max_tokens — must use max_completion_tokens.
+      // Without this the call 400'd and we silently fell through to
+      // genre='generic' for every prompt, killing the noir / sci-fi /
+      // gothic tonal amplification.
+      max_completion_tokens: 20,
     });
 
     const text = (completion.choices[0]?.message?.content ?? '').trim().toLowerCase();

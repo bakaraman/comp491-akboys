@@ -50,7 +50,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
   if (user === undefined) {
     return (
       <div style={{
-        height: '100vh',
+        /* 100dvh tracks the actual visible area (iOS Safari URL bar
+         * aware). 100vh would put the "Checking identity..." text below
+         * the fold on first load. */
+        height: '100dvh',
+        minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

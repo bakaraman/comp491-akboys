@@ -30,6 +30,9 @@ html, body {
   font-family: 'Georgia', 'Times New Roman', serif;
   background-color: var(--bg-primary);
   color: var(--text-primary);
+  /* iOS: stop auto-zoom on landscape rotation */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 ::selection {
@@ -54,5 +57,38 @@ html, body {
 @media (max-width: 640px) {
   html, body {
     font-size: 14px;
+  }
+}
+
+/* -------------------------------------------------------------------- */
+/*  Mobile responsive (≤768px) — additive, never overrides desktop.    */
+/*  Desktop layout (>768px) is untouched. Mobile rules below tweak     */
+/*  HTML-level concerns (zoom on input, tap target minimums, safe-area) */
+/*  that React inline-style cannot express via @media queries.          */
+/* -------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  /* iOS Safari: any <input> / <textarea> with font-size <16px triggers
+     auto-zoom on focus, which permanently pushes our layout out of frame.
+     Forcing 16px on the form controls themselves is the only fix that
+     works without zooming the whole page. */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Honour the iPhone X+ home-bar / notch — only matters when a layout
+     extends edge-to-edge with viewport-fit=cover. Components opt in by
+     adding `padding-bottom: env(safe-area-inset-bottom)` themselves. */
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Hover effects don't fire on touch, but :hover styles can stick after
+     a tap on iOS/Android and look like a stuck "highlight" state. Disable
+     the global one we set via inline onMouseEnter handlers — those run
+     and reset themselves; this only affects ::-webkit scrollbar hover. */
+  ::-webkit-scrollbar {
+    width: 4px;
   }
 }

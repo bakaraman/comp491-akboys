@@ -71,8 +71,8 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
   return (
     <form data-tutorial="action-input" onSubmit={handleSubmit} style={{
       display: 'flex',
-      gap: '12px',
-      padding: '20px 24px',
+      gap: 'clamp(6px, 2vw, 12px)',
+      padding: 'clamp(10px, 3vw, 20px) clamp(10px, 3vw, 24px)',
       borderTop: '1px solid #2a2520',
       backgroundColor: '#0d0d0d',
     }}>
@@ -85,11 +85,13 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
         placeholder={placeholder}
         style={{
           flex: 1,
-          padding: '14px 18px',
+          minWidth: 0,
+          padding: 'clamp(10px, 3vw, 14px) clamp(12px, 3vw, 18px)',
           backgroundColor: '#111111',
           border: '1px solid #2a2520',
           borderRadius: '8px',
           color: '#e8e0d4',
+          /* 16px on mobile globally (globals.css) prevents iOS zoom. */
           fontSize: '15px',
           fontFamily: 'Georgia, serif',
           outline: 'none',
@@ -99,7 +101,7 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
         type="submit"
         disabled={isDisabled}
         style={{
-          padding: '14px 28px',
+          padding: 'clamp(10px, 3vw, 14px) clamp(14px, 4vw, 28px)',
           backgroundColor: isDisabled ? '#1a1510' : '#d4a843',
           color: isDisabled ? '#5a5040' : '#0a0a0a',
           border: 'none',
@@ -111,6 +113,7 @@ export function ChatInput({ onSend, onTypingChange, playerName, disabled }: Chat
           textTransform: 'uppercase',
           cursor: isDisabled ? 'not-allowed' : 'pointer',
           transition: 'background-color 0.2s',
+          flexShrink: 0,
         }}
       >
         {T.game.send}

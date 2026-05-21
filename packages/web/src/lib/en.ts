@@ -129,6 +129,11 @@ export const T: Translations = {
     spectatorFooter: '👁 Spectator mode — read only',
     queueYouBadge: 'YOU',
     chatInputBlocked: 'The narrator is replying…',
+    /* Mobile voice push-to-talk button (#mobile) */
+    voiceButtonHoldToTalk: 'Hold to talk',
+    voiceButtonHoldShort: 'HOLD',
+    voiceButtonOn: 'LIVE',
+    voiceButtonDisabled: 'MIC',
   },
 
   minimap: {
@@ -137,6 +142,32 @@ export const T: Translations = {
     unknownRoom: 'Unknown room',
     visited: 'Visited',
     unvisited: 'Not visited yet',
+    /* GameMap modal (#mobile-i18n) */
+    discovered: 'Discovered',
+    mapNotAvailable: 'Map not available.',
+    legendYou: 'You',
+    legendVisited: 'Visited',
+    legendUnknown: 'Unknown',
+    travelHint: 'Click an adjacent node to travel',
+    teamHeader: 'TEAM',
+    teamCount: '{n} Detectives',
+    youSuffix: '(you)',
+    locationUnknown: 'Unknown',
+    teammateLocationHint: "Teammate locations only visible in rooms you've explored.",
+    /* Theme titles + subtitles (already English; kept here so the same
+     * lookup key works for both locales) */
+    themeTitleNoir: 'Case Evidence Board',
+    themeSubtitleNoir: 'Classified — Chicago P.D.',
+    themeTitleHaunted: 'The Manor Floor Plan',
+    themeSubtitleHaunted: 'Surveyed MCMLXXVII',
+    themeTitleSpace: 'Station Zero // Schematic',
+    themeSubtitleSpace: 'SEC-01 / DECK-A / REV 7.2',
+    themeTitlePirate: 'The Crimson Tide — Chart',
+    themeSubtitlePirate: 'Aye, X Marks the Spot',
+    themeTitleWestern: 'Dust & Ashes — Town Plan',
+    themeSubtitleWestern: 'Frontier Survey, Eighteen-Seventy',
+    themeTitleCyberpunk: 'NEON GHOSTS // GRID-07',
+    themeSubtitleCyberpunk: '// 2087.04.08 :: SCTR-7 :: ACTIVE',
   },
 
   comm: {

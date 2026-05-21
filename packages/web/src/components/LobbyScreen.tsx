@@ -79,12 +79,14 @@ export function LobbyScreen({
   return (
     <div
       style={{
-        minHeight: '100vh',
+        /* 100dvh: see AuthGuard / landing for the iOS Safari URL-bar
+         * rationale. minHeight as a desktop fallback. */
+        minHeight: '100dvh',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         backgroundColor: '#0a0a0a',
-        padding: '24px',
+        padding: 'clamp(56px, 8vw, 24px) clamp(12px, 4vw, 24px) clamp(24px, 6vw, 24px)',
         overflowY: 'auto',
         position: 'relative',
       }}
@@ -96,7 +98,7 @@ export function LobbyScreen({
       <div style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 30 }}>
         <SettingsPopover align="left" />
       </div>
-      <div style={{ textAlign: 'center', maxWidth: '720px', width: '100%', marginTop: '24px' }}>
+      <div style={{ textAlign: 'center', maxWidth: '720px', width: '100%', marginTop: 'clamp(0px, 3vw, 24px)' }}>
         {/* Room code */}
         <div style={{ marginBottom: '20px' }}>
           <p
@@ -248,7 +250,7 @@ export function LobbyScreen({
               backgroundColor: '#111',
               border: '1px solid #2a2520',
               borderRadius: '14px',
-              padding: '24px',
+              padding: 'clamp(16px, 4vw, 24px)',
               textAlign: 'left',
             }}
           >
@@ -368,7 +370,7 @@ export function LobbyScreen({
               backgroundColor: '#111',
               border: '1px solid #2a2520',
               borderRadius: '14px',
-              padding: '32px',
+              padding: 'clamp(20px, 5vw, 32px)',
               textAlign: 'center',
             }}
           >

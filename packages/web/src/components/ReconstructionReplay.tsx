@@ -124,18 +124,20 @@ export function ReconstructionReplay({ sessionId, onClose }: ReconstructionRepla
         position: 'fixed', inset: 0, zIndex: 100,
         backgroundColor: 'rgba(5,4,2,0.92)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '24px',
+        padding: 'clamp(0px, 3vw, 24px)',
       }}
     >
       <div style={{
         width: '100%', maxWidth: '720px',
         backgroundColor: '#0a0807',
         border: '1px solid #2a2520',
-        borderRadius: '14px',
-        padding: '24px 26px 22px',
+        borderRadius: 'clamp(0px, 2vw, 14px)',
+        padding: 'clamp(16px, 4vw, 24px) clamp(16px, 4vw, 26px) clamp(14px, 4vw, 22px)',
         boxShadow: '0 14px 50px rgba(0,0,0,0.75)',
         position: 'relative',
-        maxHeight: '90vh',
+        /* iOS Safari: 100vh includes the chrome that hides on scroll, so it
+         * cuts the modal off. 100dvh tracks the actual visible area. */
+        maxHeight: 'min(90vh, calc(100dvh - 16px))',
         display: 'flex', flexDirection: 'column',
       }}>
         {/* Header */}
@@ -351,17 +353,23 @@ function ReplayBody({
         </div>
 
         {/* Actor */}
-        {event.actorName && (
-          <div style={{
-            fontSize: '13px',
-            fontFamily: 'monospace',
-            color: '#9a8a70',
-            letterSpacing: '0.5px',
-            marginBottom: '10px',
-          }}>
-            {event.actorRole ? `${event.actorRole} ` : ''}<strong style={{ color: '#e8d8b0' }}>{event.actorName}</strong>
-          </div>
-        )}
+        {event.actorName && (() => {
+          // event.actorRole is BilingualString ({tr, en}) — never interpolate
+          // it raw or React renders "[object Object]". pickLang() returns ''
+          // when the role was unknown server-side, so the prefix collapses.
+          const roleText = event.actorRole ? pickLang(event.actorRole, locale) : '';
+          return (
+            <div style={{
+              fontSize: '13px',
+              fontFamily: 'monospace',
+              color: '#9a8a70',
+              letterSpacing: '0.5px',
+              marginBottom: '10px',
+            }}>
+              {roleText ? `${roleText} ` : ''}<strong style={{ color: '#e8d8b0' }}>{event.actorName}</strong>
+            </div>
+          );
+        })()}
 
         {/* Description */}
         <p style={{

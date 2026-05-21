@@ -279,13 +279,16 @@ export function TutorialOverlay({
         {T.tutorial.skip}
       </button>
 
-      {/* Caption tooltip */}
+      {/* Caption tooltip — width clamps to viewport on narrow phones so it
+       * never overflows. left/top still come from the positioning math, but
+       * min(CAPTION_WIDTH, ...) keeps it visible end-to-end. */}
       <div
         style={{
           position: 'fixed',
           top: `${captionTop}px`,
           left: `${captionLeft}px`,
-          width: `${CAPTION_WIDTH}px`,
+          width: `min(${CAPTION_WIDTH}px, calc(100vw - 32px))`,
+          maxWidth: `${CAPTION_WIDTH}px`,
           padding: '16px 18px',
           backgroundColor: '#100c08',
           border: '1px solid #d4a843',

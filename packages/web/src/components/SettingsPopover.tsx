@@ -19,6 +19,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useSoundEffects } from '@/hooks/useSoundEffects';
 import { useAmbientSettings } from '@/hooks/useAmbientLoop';
 import { useT } from '@/hooks/useLocale';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { LocaleSection } from './LocaleSection';
 
 /* ------------------------------------------------------------------ */
@@ -151,6 +152,7 @@ export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: Se
   const T = useT();
   const ambient = useAmbientSettings();
   const sfx = useSoundEffects();
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -210,18 +212,38 @@ export function SettingsPopover({ align = 'right', voice, onReplayTutorial }: Se
           ref={popoverRef}
           role="dialog"
           aria-label={T.audio.settings}
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            ...(align === 'left' ? { left: 0 } : { right: 0 }),
-            width: '260px',
-            padding: '16px 18px 12px',
-            backgroundColor: '#0f0d0a',
-            border: '1px solid #2a2520',
-            borderRadius: '10px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-            zIndex: 80,
-          }}
+          style={isMobile
+            ? {
+                /* Mobile: anchor to viewport so the panel never spills off
+                 * the left edge regardless of which corner the trigger
+                 * sits in. Top sits below the header band; left/right
+                 * inset gives it the full viewport minus a small margin. */
+                position: 'fixed',
+                top: 'calc(env(safe-area-inset-top, 0px) + 56px)',
+                left: '8px',
+                right: '8px',
+                width: 'auto',
+                maxHeight: 'calc(100dvh - 80px)',
+                overflowY: 'auto',
+                padding: '14px 16px 10px',
+                backgroundColor: '#0f0d0a',
+                border: '1px solid #2a2520',
+                borderRadius: '10px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                zIndex: 80,
+              }
+            : {
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                ...(align === 'left' ? { left: 0 } : { right: 0 }),
+                width: '260px',
+                padding: '16px 18px 12px',
+                backgroundColor: '#0f0d0a',
+                border: '1px solid #2a2520',
+                borderRadius: '10px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                zIndex: 80,
+              }}
         >
           <div style={{
             fontFamily: 'Georgia, serif',

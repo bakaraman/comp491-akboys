@@ -141,13 +141,17 @@ export default function HomePage() {
     <AuthGuard>
       <div
         style={{
-          minHeight: '100vh',
+          /* 100dvh fixes iOS Safari's "centered content below visible
+           * area" bug: with 100vh + justifyContent:center, the URL bar
+           * shifts content into the hidden chrome zone, so the user sees
+           * black on first paint. 100dvh tracks real viewport. */
+          minHeight: '100dvh',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: '#0a0a0a',
-          padding: '24px',
+          padding: 'clamp(60px, 8vw, 24px) clamp(12px, 4vw, 24px) clamp(24px, 6vw, 24px)',
           position: 'relative',
         }}
       >
@@ -196,7 +200,7 @@ export default function HomePage() {
           {/* Title */}
           <h1
             style={{
-              fontSize: '46px',
+              fontSize: 'clamp(32px, 9vw, 46px)',
               color: '#d4a843',
               fontFamily: 'Georgia, serif',
               fontStyle: 'italic',
@@ -243,7 +247,7 @@ export default function HomePage() {
             {/* Create room card */}
             <div
               style={{
-                padding: '24px',
+                padding: 'clamp(16px, 4vw, 24px)',
                 backgroundColor: '#0f0f0f',
                 border: '1px solid #1e1a14',
                 borderRadius: '14px',
@@ -301,7 +305,7 @@ export default function HomePage() {
             {/* Join room card */}
             <div
               style={{
-                padding: '24px',
+                padding: 'clamp(16px, 4vw, 24px)',
                 backgroundColor: '#0f0f0f',
                 border: '1px solid #1e1a14',
                 borderRadius: '14px',

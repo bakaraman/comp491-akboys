@@ -27,7 +27,9 @@ import { GameMap } from '@/components/GameMap';
 import type { MapRoom, MapNPC } from '@/components/GameMap';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { TutorialOverlay, hasSeenTutorial, clearTutorialSeen } from '@/components/TutorialOverlay';
+import { MobileVoiceButton } from '@/components/MobileVoiceButton';
 import { disconnectSocket } from '@/lib/socket';
 import { usePlayerName } from '@/hooks/usePlayerName';
 import { NamePopup } from '@/components/NamePopup';
@@ -74,6 +76,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const searchParams = useSearchParams();
   const isSpectator = searchParams.get('role') === 'spectator';
   const [authReady, setAuthReady] = useState(!authEnabled());
+  /* Mobile responsive — SSR-safe (false on first render, true after mount
+   * if viewport ≤768px). Only used for layout forks; visual polish that
+   * doesn't need a re-render lives in globals.css @media blocks. */
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!authEnabled()) return;
@@ -321,7 +327,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ================================================================ */
   if (fetchError) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
+      <div style={{ height: '100dvh', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <p style={{ color: '#6a6050', fontSize: '16px', marginBottom: '24px' }}>{T.game.sessionNotFound}</p>
         <a href="/" style={{ padding: '12px 32px', backgroundColor: '#d4a843', color: '#0a0a0a', borderRadius: '8px', textDecoration: 'none', fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>{T.game.backToHome}</a>
       </div>
@@ -333,7 +339,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   /* ================================================================ */
   if (!sessionInfo) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
+      <div style={{ height: '100dvh', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '3px solid #2a2520', borderTopColor: '#d4a843', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
           <p style={{ color: '#4a4540', fontStyle: 'italic' }}>{T.game.loadingSession}</p>
@@ -356,7 +362,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   // Spectators skip the player-join flow — they see the game immediately
   if (!mp.myPlayerId && !isSpectator) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
+      <div style={{ height: '100dvh', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <div style={{ textAlign: 'center' }}>
           {isJoining && (
             <>
@@ -425,11 +431,37 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const gameEmoji = '\uD83D\uDD75\uFE0F';
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>
-      {/* Header */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid #2a2520', backgroundColor: '#0d0d0d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '16px', color: '#d4a843', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+    <div style={{ height: '100dvh', minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>
+      {/* Header — on mobile wraps to two rows and shrinks padding; desktop
+          render path (≥769px) is unchanged. */}
+      <div style={{
+        padding: isMobile ? '8px 10px' : '12px 20px',
+        borderBottom: '1px solid #2a2520',
+        backgroundColor: '#0d0d0d',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexShrink: 0,
+        flexWrap: isMobile ? 'wrap' : 'nowrap',
+        gap: isMobile ? '6px' : undefined,
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isMobile ? '8px' : '12px',
+          minWidth: 0,
+          flex: isMobile ? '1 1 100%' : undefined,
+        }}>
+          <span style={{
+            fontSize: isMobile ? '14px' : '16px',
+            color: '#d4a843',
+            fontFamily: 'Georgia, serif',
+            fontStyle: 'italic',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}>
             {gameEmoji} {gameScenarioTitle}
           </span>
           {roomCode && <span style={{ fontSize: '10px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>{roomCode}</span>}
@@ -466,7 +498,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             );
           })()}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isMobile ? '4px' : '8px',
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
+          justifyContent: isMobile ? 'flex-end' : undefined,
+          flex: isMobile ? '1 1 100%' : undefined,
+        }}>
           <CopyLinkButton compact />
           {/* A.2: Audio settings — ambient + SFX volume/mute, persisted.
               #48: Voice section is wired in session pages so users can pick
@@ -542,7 +581,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} data-tutorial="chat-area" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+      <div ref={scrollRef} data-tutorial="chat-area" style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: isMobile ? '12px' : '24px',
+        WebkitOverflowScrolling: 'touch',
+      }}>
         {mp.messages.map((msg) => (
           <ChatMessage
             key={msg.id}
@@ -589,7 +633,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
        * action, bypassing the disabled input. Mirror the disabled
        * state here so the lock is honored from both surfaces. */}
       {!isSpectator && mp.suggestions.length > 0 && !mp.isNarratorStreaming && (
-        <div style={{ display: 'flex', gap: '8px', padding: '8px 20px', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a' }}>
+        <div style={{
+          display: 'flex',
+          gap: isMobile ? '6px' : '8px',
+          padding: isMobile ? '8px 10px' : '8px 20px',
+          flexWrap: 'wrap',
+          borderTop: '1px solid #1a1a1a',
+        }}>
           {mp.suggestions.map((s, i) => {
             const locked = mp.isMyActionPending;
             return (
@@ -641,6 +691,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <div style={{ padding: '10px 20px', borderTop: '1px solid #1a1a1a', textAlign: 'center', fontSize: '11px', color: '#3a3530', fontFamily: 'monospace', letterSpacing: '1px' }}>
           {T.game.spectatorFooter}
         </div>
+      )}
+
+      {/* Mobile push-to-talk button — desktop keeps the V-key handler. The
+       * button only mounts on mobile-sized viewports and when the player is
+       * an active participant (not spectator) of a multiplayer session. */}
+      {isMobile && !isSpectator && isMultiplayer && (
+        <MobileVoiceButton
+          status={voice.status}
+          isTransmitting={voice.isTransmitting}
+          setTransmit={voice.setTransmit}
+        />
       )}
 
       <PlayerSidebar
@@ -815,7 +876,13 @@ function AccusationVoteBanner({
       backgroundColor: '#1a1510', border: '1px solid #d4a843',
       borderRadius: '12px', padding: '16px 22px', zIndex: 60,
       boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
-      minWidth: '360px', maxWidth: '520px',
+      /* Mobile-safe: never wider than viewport minus margin, never narrower
+       * than the content needs. minWidth removed because it overflowed on
+       * <360px devices and pushed the right edge under the screen. */
+      width: 'min(calc(100vw - 24px), 520px)',
+      maxWidth: '520px',
+      maxHeight: 'calc(100vh - 96px)',
+      overflowY: 'auto',
       animation: 'fadeInUp 0.3s ease',
     }}>
       <div style={{
@@ -902,11 +969,18 @@ function AccuseModal({
     <div style={{
       position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.78)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 75,
+      /* Keyboard-aware: on mobile when the iOS keyboard opens it can push
+       * the centered modal off-screen. Allow the wrapper itself to scroll
+       * so users can always reach the action buttons. */
+      overflowY: 'auto',
+      padding: '16px',
     }}>
       <div style={{
         width: '100%', maxWidth: '460px', backgroundColor: '#111',
-        border: '1px solid #2a2520', borderRadius: '14px', padding: '28px',
-        margin: '0 16px',
+        border: '1px solid #2a2520', borderRadius: '14px',
+        padding: 'clamp(18px, 5vw, 28px)',
+        maxHeight: 'calc(100vh - 32px)',
+        overflowY: 'auto',
       }}>
         <h2 style={{ color: '#d46868', fontFamily: 'Georgia, serif', fontStyle: 'italic', marginTop: 0, marginBottom: '6px' }}>
           {T.accuse.title}

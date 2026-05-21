@@ -66,6 +66,13 @@ export interface UseVoiceChatReturn {
   selectedOutputId: string | null;
   setSelectedInputId: (id: string | null) => void;
   setSelectedOutputId: (id: string | null) => void;
+  /**
+   * Imperative PTT switch — used by the mobile push-to-talk button so the
+   * UI can mirror the V-key behaviour via touch. Desktop keeps the keyboard
+   * listener; this API is additive and safe to call from either input
+   * modality. No-op if voice is not active.
+   */
+  setTransmit: (on: boolean) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -545,7 +552,23 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
     }
   }, [selectedOutputId]);
 
-  /* ---- V-key push-to-talk ---- */
+  /* ---- Imperative transmit switch (shared by V-key + mobile touch button) ----
+   *
+   * Lifted out of the keyboard useEffect so the mobile PTT button can
+   * drive the same mic-track toggle without duplicating the closure.
+   * No-op when no stream exists (voice not active yet / denied / unsupported),
+   * so it is always safe to call from React event handlers.
+   */
+  const setTransmit = useCallback((on: boolean) => {
+    if (isTransmittingRef.current === on) return;
+    isTransmittingRef.current = on;
+    setIsTransmitting(on);
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((t) => { t.enabled = on; });
+  }, []);
+
+  /* ---- V-key push-to-talk (desktop only — no-op for touch devices) ---- */
   useEffect(() => {
     if (!enabled || !supported) return;
 
@@ -555,15 +578,6 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
       if (target instanceof HTMLTextAreaElement) return true;
       if (target instanceof HTMLElement && target.isContentEditable) return true;
       return false;
-    }
-
-    function setTransmit(on: boolean) {
-      if (isTransmittingRef.current === on) return;
-      isTransmittingRef.current = on;
-      setIsTransmitting(on);
-      const stream = localStreamRef.current;
-      if (!stream) return;
-      stream.getAudioTracks().forEach((t) => { t.enabled = on; });
     }
 
     function onKeyDown(e: KeyboardEvent) {
@@ -598,7 +612,7 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
       const stream = localStreamRef.current;
       if (stream) stream.getAudioTracks().forEach((t) => { t.enabled = false; });
     };
-  }, [enabled, supported]);
+  }, [enabled, supported, setTransmit]);
 
   return {
     status,
@@ -610,5 +624,6 @@ export function useVoiceChat({ sessionId, myPlayerId, enabled }: UseVoiceChatArg
     selectedOutputId,
     setSelectedInputId,
     setSelectedOutputId,
+    setTransmit,
   };
 }

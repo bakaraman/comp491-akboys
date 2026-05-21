@@ -12,6 +12,20 @@
 
 import type { WorldData } from './schema.js';
 
+/** Number-to-word for the fallback opening narration so the count matches
+ *  the actual player count instead of the hardcoded "beş / five" copy
+ *  that used to ship regardless of how many detectives joined. */
+const TR_NUMBER_WORDS = ['', 'bir', 'iki', 'üç', 'dört', 'beş', 'altı', 'yedi', 'sekiz', 'dokuz', 'on'] as const;
+const EN_NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const;
+
+function trDetectiveCount(n: number): string {
+  return `${TR_NUMBER_WORDS[n] ?? n} dedektif`;
+}
+function enDetectiveCount(n: number): string {
+  const word = EN_NUMBER_WORDS[n] ?? String(n);
+  return n === 1 ? `${word} detective` : `${word} detectives`;
+}
+
 export function getFallbackWorld(playerCount: number): WorldData {
   const clamped = Math.min(Math.max(playerCount, 2), 10);
 
@@ -309,8 +323,8 @@ export function getFallbackWorld(playerCount: number): WorldData {
     ],
     entryScenes,
     openingNarration: {
-      tr: 'Yağmur, Lena Hart kaybolduğu geceden beri dinmedi. Velvet Lounge\'un caz şarkıcısı dün gece yarısından sonra kimse tarafından görülmedi. Bu gece beş dedektif aynı soruyu sormak için uyandı — ama farklı kapılardan girdiler. Şehir sabaha kadar bir cevap bekliyor.',
-      en: 'The rain hasn\'t let up since the night Lena Hart vanished. The Velvet Lounge\'s jazz singer was last seen just past midnight. Tonight, five detectives wake to ask the same question — but each comes through a different door. The city waits for an answer before dawn.',
+      tr: `Yağmur, Lena Hart kaybolduğu geceden beri dinmedi. Velvet Lounge'un caz şarkıcısı dün gece yarısından sonra kimse tarafından görülmedi. Bu gece ${trDetectiveCount(clamped)} aynı soruyu sormak için uyandı — ama farklı kapılardan girdiler. Şehir sabaha kadar bir cevap bekliyor.`,
+      en: `The rain hasn't let up since the night Lena Hart vanished. The Velvet Lounge's jazz singer was last seen just past midnight. Tonight, ${enDetectiveCount(clamped)} wake to ask the same question — but each comes through a different door. The city waits for an answer before dawn.`,
     },
     solution: {
       culpritNpcId: 'bartender_mickey',
