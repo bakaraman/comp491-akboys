@@ -70,6 +70,8 @@ import {
   generateOpeningImageFromPrompt,
 } from '../world/index.js';
 import { setupVoiceHandlers, leaveVoice } from './voice-handlers.js';
+import { streamTts } from '../world/tts.js';
+import { setCached as setCachedTts } from '../lib/tts-cache.js';
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -353,14 +355,20 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const systemPrompt = buildPlayerActionPrompt(scenario, session, action.playerName, action.roomId, session.world ?? null);
       const actionMsg = `[${action.playerName} / ${action.roomId}] "${action.message}"`;
 
-      // Store action in history (chat-private — Velvet Shadow v3 isolation).
-      //
-      // Pre-v3 the actor's typed action was also visible to same-room
-      // witnesses so co-op players saw each other's prompts. v3 walks that
-      // back: each player only ever sees their own typed input + their own
-      // narrator response in chat. World state (MOVE, NPC moves, items)
-      // stays shared, so the narrator can still tell witnesses about the
-      // consequences in their own next turn.
+      // 2026-05-22 same-room sharing restored: actor + everyone who is
+      // physically in the same room sees the action message AND the
+      // narrator's response. Players in *different* rooms still get their
+      // own private feeds. The room boundary is the actor's room at the
+      // time of action (action.roomId) — if the narrator emits a MOVE
+      // mid-action, only the witnesses present when the action started
+      // see the prose.
+      const sameRoomAudience: string[] = [action.playerId];
+      for (const p of session.players.values()) {
+        if (p.currentRoomId === action.roomId && p.isConnected && p.id !== action.playerId) {
+          sameRoomAudience.push(p.id);
+        }
+      }
+
       store.addMessage(sessionId, {
         role: 'user',
         content: actionMsg,
@@ -368,13 +376,12 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         playerName: action.playerName,
         timestamp: Date.now(),
         messageType: 'action',
-        visibleTo: [action.playerId],
+        visibleTo: sameRoomAudience,
       });
 
       const actorSockets = findSocketsForPlayer(action.playerId);
-      // v3 isolation: narrator chunks AND the typed action emit are both
-      // actor-only. Witnesses get their own queue/typing indicators via
-      // the unchanged session:queue / player:typing-update broadcasts.
+      const witnessSocketIds = findSocketsInRoom(store, sessionId, action.roomId, action.playerId);
+      const streamFanoutSockets = new Set<string>([...actorSockets, ...witnessSocketIds]);
 
       // Primary: structured JSON response (no streaming, but guaranteed schema)
       // Fallback: streaming text response with legacy parsing
@@ -412,24 +419,24 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         observedLine = parsed.observedLine;
         directives = parsed.directives;
 
-        // #58: narrator response is ACTOR-ONLY. In bilingual MP, witnesses
-        // were receiving the actor's narrator translated into their own
-        // locale, which read as a second-person ("sen / you") message and
-        // looked like the witness's own action — extremely confusing. The
-        // witness still sees the actor's typed action message (stored above
-        // with same-room visibleTo) so co-op context is not lost; only the
-        // narrator's prose is private to the actor.
-        const flat = flattenFor(action.playerId, privateResponse);
-        const actorSocketIds = findSocketsForPlayer(action.playerId);
-        for (const sid of actorSocketIds) {
+        // 2026-05-22 same-room sharing: fan out the narrator response to the
+        // actor + everyone in the same room. Each socket gets the text
+        // flattened to *its own* player's locale so a TR witness reading an
+        // EN actor's action still sees Turkish prose (and vice-versa). The
+        // targetPlayerId field still labels whose action this was so the
+        // client UI can prefix witnesses' chat with the actor's name.
+        for (const sid of streamFanoutSockets) {
+          const sockMapping = socketMap.get(sid);
+          const targetPid = sockMapping?.playerId ?? action.playerId;
+          const text = flattenFor(targetPid, privateResponse);
           io.to(sid).emit('narrator:chunk', {
-            content: flat,
-            fullText: flat,
+            content: text,
+            fullText: text,
             targetPlayerId: action.playerId,
           });
         }
 
-        console.log(`[batcher] structured response for ${action.playerName}`);
+        console.log(`[batcher] structured response for ${action.playerName} → ${streamFanoutSockets.size} sockets (actor + ${witnessSocketIds.length} witnesses)`);
       } else {
         // Fallback: streaming text response with legacy tag parsing.
         // Legacy path is single-language (Turkish). Stream as-is to the
@@ -441,9 +448,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         try {
           for await (const chunk of narratorChatStream(systemPrompt, session.history, sessionId)) {
             fullText += chunk;
-            // #58: legacy fallback is also actor-only — same reasoning as the
-            // structured path (witnesses don't see second-person prose).
-            for (const sid of actorSockets) {
+            // 2026-05-22 same-room sharing: legacy fallback is single-language
+            // (TR only) so no per-socket flattening is needed — fan the same
+            // chunk to the actor + every same-room witness.
+            for (const sid of streamFanoutSockets) {
               io.to(sid).emit('narrator:chunk', {
                 content: chunk,
                 fullText,
@@ -532,11 +540,10 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         );
       }
 
-      // #58: narrator response is ACTOR-ONLY (see emit block above for why).
-      // The actor's typed action message is already visible to same-room
-      // witnesses (stored earlier with a same-room visibleTo); witnesses
-      // read what was done but not the second-person prose addressed to
-      // the actor.
+      // 2026-05-22 same-room sharing: narrator response is visible to the
+      // actor + everyone who was in the room when the action started. Each
+      // client flattens bilingualContent to its player's locale at read
+      // time (see filterHistoryForPlayer + web pickLang).
       store.addMessage(sessionId, {
         role: 'assistant',
         content: privateResponse.tr,
@@ -545,7 +552,7 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         playerName: action.playerName,
         timestamp: Date.now(),
         messageType: 'private',
-        visibleTo: [action.playerId],
+        visibleTo: sameRoomAudience,
       });
 
       // Generate scoped suggestions for the actor (witnesses don't get suggestions —
@@ -572,16 +579,18 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
       const updatedPlayersAfterAction = Array.from(session.players.values()).map(toPlayerDTO);
       io.to(sessionId).emit('players:updated', { players: updatedPlayersAfterAction });
 
-      // #58: narrator:done is ACTOR-ONLY (matches the actor-only narrator:chunk
-      // path above). Witnesses do not receive the second-person narrator prose
-      // because in bilingual MP it translates as if it were addressed to them,
-      // which is confusing. They still see the actor's typed action message.
-      const actorDoneSockets = findSocketsForPlayer(action.playerId);
-      const actorFlat = flattenFor(action.playerId, privateResponse);
-      for (const sid of actorDoneSockets) {
+      // 2026-05-22 same-room sharing: narrator:done fans out to the actor
+      // + same-room witnesses. Each socket gets the prose flattened to its
+      // own locale. Only the actor gets the suggestion buttons — witnesses
+      // read along but don't take actions on the actor's behalf.
+      for (const sid of streamFanoutSockets) {
+        const sockMapping = socketMap.get(sid);
+        const targetPid = sockMapping?.playerId ?? action.playerId;
+        const text = flattenFor(targetPid, privateResponse);
+        const isActor = actorSockets.includes(sid);
         io.to(sid).emit('narrator:done', {
-          fullText: actorFlat,
-          suggestions: actorSuggestions,
+          fullText: text,
+          suggestions: isActor ? actorSuggestions : [],
           targetPlayerId: action.playerId,
         });
       }
@@ -1211,6 +1220,33 @@ export function registerSocketHandlers(io: GameServer, store: SessionStore): voi
         store.markOpeningReady(sessionId);
         console.log(`[story ${sid}] ✓ emit story:ready (total=${Date.now() - tStoryStart}ms) — opening image running in parallel`);
         void openingImagePromise;
+
+        // 2026-05-22 demo speed-up: server-side TTS pre-warm for BOTH locales.
+        // Fires in parallel right after story:ready so the audio buffer is in
+        // memory before the host clicks "open curtain". Routes/chat.ts checks
+        // this cache and serves the cached MP3 instantly.
+        void (async () => {
+          const narrationTr = pickLang(result.world.openingNarration, 'tr');
+          const narrationEn = pickLang(result.world.openingNarration, 'en');
+          const tPrewarm = Date.now();
+          const [resTr, resEn] = await Promise.allSettled([
+            (async () => {
+              const t = Date.now();
+              const ttsRes = await streamTts({ text: narrationTr, locale: 'tr', voice: 'ash', sessionId });
+              const buf = Buffer.from(await ttsRes.arrayBuffer());
+              setCachedTts(sessionId, 'tr', narrationTr, 'ash', buf, Date.now() - t);
+            })(),
+            (async () => {
+              const t = Date.now();
+              const ttsRes = await streamTts({ text: narrationEn, locale: 'en', voice: 'onyx', sessionId });
+              const buf = Buffer.from(await ttsRes.arrayBuffer());
+              setCachedTts(sessionId, 'en', narrationEn, 'onyx', buf, Date.now() - t);
+            })(),
+          ]);
+          if (resTr.status === 'rejected') console.warn(`[story ${sid}] TTS pre-warm tr failed`, resTr.reason);
+          if (resEn.status === 'rejected') console.warn(`[story ${sid}] TTS pre-warm en failed`, resEn.reason);
+          console.log(`[story ${sid}] ✓ TTS pre-warm both locales (${Date.now() - tPrewarm}ms)`);
+        })();
 
         // NOTE: per-room and per-NPC images intentionally NOT generated.
         // Only the single opening cinematic image matters; skipping these

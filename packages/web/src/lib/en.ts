@@ -30,7 +30,7 @@ export const T: Translations = {
     joining: 'Joining…',
     spectatorJoin: '👁 Join as spectator',
     signOut: 'Sign Out',
-    courseNote: 'COMP 491 · AKBOYS · Spring 2026',
+    courseNote: 'The Velvet Shadow',
   },
 
   multiplayer: {

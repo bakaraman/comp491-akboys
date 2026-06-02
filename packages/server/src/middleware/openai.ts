@@ -324,8 +324,8 @@ export async function narratorChat(
   return completion.choices[0]?.message?.content || 'The narrator is silent...';
 }
 
-/** Fast model for lightweight tasks — gpt-5-nano with minimal reasoning for speed */
-const FAST_MODEL = 'gpt-5-nano';
+/** Fast model for lightweight tasks — gpt-5.4-nano with minimal reasoning for speed */
+const FAST_MODEL = 'gpt-5.4-nano';
 
 /**
  * Scene context for grounded suggestions — what the player can actually
@@ -459,7 +459,8 @@ EXAMPLE 3 — Scene: empty attic, no people, no objects, adjacent [merdiven boş
           { role: 'user', content: userPrompt },
         ],
         max_completion_tokens: 250,
-        reasoning_effort: 'minimal' as 'low',
+        // gpt-5.4-nano dropped 'minimal' — 'none' is the new "no reasoning" value.
+        reasoning_effort: 'none' as 'low',
         response_format: {
           type: 'json_schema',
           json_schema: {
@@ -532,7 +533,7 @@ EXAMPLE 3 — Scene: empty attic, no people, no objects, adjacent [merdiven boş
  */
 export async function generateSceneImage(prompt: string, sessionId?: string): Promise<string> {
   const t0 = Date.now();
-  const IMAGE_MODEL = 'gpt-image-1.5';
+  const IMAGE_MODEL = 'gpt-image-2';
   try {
     const response = await withOpenAIRetry('image-gen', () =>
       openaiClient().images.generate({

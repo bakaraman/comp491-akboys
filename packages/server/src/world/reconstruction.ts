@@ -35,9 +35,9 @@ import { withOpenAIRetry } from '../lib/openai-retry.js';
 import { logFromCompletion } from '../lib/usage-logger.js';
 
 const DEBUG = '[reconstruction]';
-const EVENTS_MODEL = 'gpt-5-nano';
+const EVENTS_MODEL = 'gpt-5.4-nano';
 const EVENTS_MAX_TOKENS = 6000;
-const CONCLUSION_MODEL = 'gpt-4o-mini';
+const CONCLUSION_MODEL = 'gpt-4.1-nano';
 const CONCLUSION_MAX_TOKENS = 500;
 
 /* ------------------------------------------------------------------ */
@@ -325,7 +325,8 @@ export async function generateReconstruction(
         { role: 'user', content: user },
       ],
       max_completion_tokens: EVENTS_MAX_TOKENS,
-      reasoning_effort: 'minimal' as 'low',
+      // gpt-5.4-nano dropped 'minimal' — 'none' is the new no-reasoning value.
+      reasoning_effort: 'none' as 'low',
       response_format: zodResponseFormat(schema, 'crime_reconstruction_events'),
     }),
   );

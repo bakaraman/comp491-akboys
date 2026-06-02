@@ -27,7 +27,7 @@ export const T = {
     joining: 'Katılıyor…',
     spectatorJoin: '👁 İzleyici olarak katıl',
     signOut: 'Çıkış Yap',
-    courseNote: 'COMP 491 · AKBOYS · Bahar 2026',
+    courseNote: 'The Velvet Shadow',
   },
 
   multiplayer: {

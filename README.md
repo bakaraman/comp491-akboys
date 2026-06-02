@@ -1,157 +1,169 @@
-# Text-Based Adventure with LLMs
+# The Velvet Shadow
 
-**COMP 491 Senior Design Project — Koc University, Spring 2026**
+> A real-time, AI-narrated multiplayer detective game where every mystery is
+> procedurally generated from a one-sentence prompt.
 
-An AI-powered text adventure game where a large language model narrates interactive stories in real-time. Players pick a scenario, explore rooms, talk to NPCs, and solve mysteries — all through natural language.
+Up to ten players cooperate to investigate a procedurally crafted crime,
+interrogate NPCs that defend their own alibis, search rooms, and stake one
+unanimous accusation before the turn limit runs out. The narrator is a large
+language model; the world, the suspects, and the truth are all written on the
+fly. Fully bilingual (Turkish + English) end-to-end — same session, two
+languages.
 
-## Team (AKBOYS)
+## Features
 
-| Name | Student ID | Role |
-|---|---|---|
-| Kadir Yigit Ozcelik | 79975 | Frontend & UI |
-| Serdar Yengil | 80232 | Backend & API |
-| Batuhan Karaman | 79791 | Infrastructure & GCP |
-| Ata Berke Goktekin | 80277 | Game Design & Prompts |
-
-**Advisor:** Baris Akgun
+- **Procedural worlds** — host types one sentence; an LLM returns a complete
+  world: rooms, NPCs with alibis and motives, evidence, red herrings, a hidden
+  culprit.
+- **Free-text investigation** — type any action in natural language. No menus,
+  no scripted choices. The narrator interprets and responds in cinematic prose.
+- **NPCs that lie** — every character has a private backstory, a fragile alibi,
+  and a hidden secret. Press them and they slip.
+- **One-shot accusation** — wrong suspect or wrong evidence ends the game. The
+  accusation must be unanimous. Red herrings punish careless deduction.
+- **Real-time multiplayer** — up to 10 detectives. Same-room players share the
+  narrator's feed; voice chat and a shared evidence board turn investigation
+  into teamwork.
+- **Bilingual in one session** — TR and EN flow from a single LLM call.
+  Localized narrator voice (Turkish + English TTS) for each player.
+- **Cinematic post-game** — crime-scene reconstruction replay and a downloadable
+  PDF case file with genre-adaptive styling.
+- **Live cost telemetry** — every OpenAI call is logged with token + latency +
+  cost to a Firestore-backed `/admin/usage` dashboard.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 15, React 19, TypeScript |
-| Backend | Express.js, TypeScript |
-| AI (Narrator) | OpenAI GPT-5.4 (streaming, SSE) |
-| AI (Suggestions) | OpenAI GPT-5-nano (minimal reasoning) |
-| AI (Images) | OpenAI GPT Image 1.5 (`low`, `jpeg`, 1024x1024) |
-| Database | Firestore-backed session persistence |
-| Realtime | Socket.IO |
-| Auth | Firebase Auth (Google sign-in) |
-| Markdown | react-markdown |
+| Frontend | Next.js 15 (App Router), React 19, TypeScript |
+| Backend | Node.js, Express, Socket.IO, TypeScript |
+| AI Narrator | OpenAI `gpt-5.4` (streaming + structured outputs) |
+| AI Worldgen / Finale | OpenAI `gpt-5.4-mini` |
+| AI Suggestions / Reconstruction | OpenAI `gpt-5.4-nano`, `gpt-4.1-nano` |
+| AI Scene Art | OpenAI `gpt-image-2` |
+| AI TTS | OpenAI `gpt-4o-mini-tts` (bilingual) |
+| Persistence | Firebase Firestore (sessions + usage telemetry) |
+| Auth | Firebase Auth (Google sign-in, optional) |
+| PDF | `@react-pdf/renderer` (genre-adaptive case file) |
 | Monorepo | npm workspaces |
 
 ## Project Structure
 
 ```
-comp491-akboys/
+.
 ├── packages/
-│   ├── shared/          # Shared types & scenario data
+│   ├── shared/                    # Shared types + bilingual scenario fallback
+│   ├── server/                    # Express + Socket.IO real-time backend
 │   │   └── src/
-│   │       ├── types/         # Room, NPC, Item, Scenario, ChatMessage, etc.
-│   │       └── constants/     # 6 scenarios (noir, haunted, space, pirate, western, cyberpunk)
-│   ├── server/          # Express backend
-│   │   └── src/
-│   │       ├── index.ts       # Entry point (port 3001)
-│   │       ├── routes/chat.ts # All API routes
-│   │       ├── middleware/openai.ts  # GPT-5.4 streaming + GPT-5-nano suggestions
-│   │       └── store/SessionStore.ts # Session interface + memory / Firestore implementations
-│   └── web/             # Next.js frontend
+│   │       ├── lib/               # openai-client, retry, usage-logger, tts-cache
+│   │       ├── middleware/        # OpenAI wrappers (narrator, structured, suggestions)
+│   │       ├── routes/chat.ts     # REST endpoints (chat, image, TTS, finale, PDF)
+│   │       ├── socket/            # Real-time handlers + action batcher
+│   │       ├── store/             # Memory + Firestore session stores
+│   │       ├── world/             # Worldgen, reconstruction, finale, TTS, images
+│   │       └── pdf/               # Case-file PDF document
+│   └── web/                       # Next.js client
 │       └── src/
-│           ├── app/
-│           │   ├── page.tsx              # Home — scenario picker
-│           │   └── session/[id]/page.tsx # Game — chat interface per session
-│           └── components/
-│               ├── ChatMessage.tsx  # Markdown-rendered message bubbles
-│               └── ChatInput.tsx    # Player text input
-├── docs/                # Course documents, templates, generators
-├── .env.example         # Environment variable template
-└── package.json         # Root workspace config
+│           ├── app/               # Pages: home, /session/[id], /replay, /admin/usage
+│           ├── components/        # Lobby, ChatMessage, FinaleCinematic, GameMap, etc.
+│           ├── hooks/             # useMultiplayerSession, useLocale, useVoiceChat
+│           └── lib/               # firebase, tr/en strings, pickLang
+└── docs/                          # Architecture / Boot / Contributing / Design
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Clone
-git clone https://github.com/bakaraman/comp491-akboys.git
-cd comp491-akboys
+git clone https://github.com/<your-fork>/velvet-shadow.git
+cd velvet-shadow
 
-# 2. Install dependencies
+# 2. Install
 npm install
 
-# 3. Set up environment
+# 3. Configure
 cp .env.example .env
-# Edit .env and add your OpenAI API key:
-# OPENAI_API_KEY=sk-...
+# Edit .env — at minimum set OPENAI_API_KEY=sk-...
+# For Firestore persistence + auth, also set FIREBASE_PROJECT_ID
+# and run `gcloud auth application-default login`.
 
-# 4. Run both server and web
+# 4. Run
 npm run dev:local
 ```
 
-- **Web:** http://localhost:3000
-- **Server:** http://localhost:3001
+- Web:    http://localhost:3000
+- Server: http://localhost:3001
+- Live cost dashboard: http://localhost:3000/admin/usage
 
-## How It Works
+## How a Game Flows
 
-1. Player opens `/` and picks one of 6 scenarios
-2. A session is created with a unique UUID
-3. Player is redirected to `/session/[uuid]`
-4. The narrator (GPT-5.4) streams the opening scene via SSE
-5. Player types actions, narrator responds in real-time
-6. After each narrator response, 3 follow-up suggestions appear (GPT-5-nano)
-7. When the player enters a new room, the frontend can request a cached scene image from GPT Image 1.5
+1. **Host** opens the home page, types a one-sentence prompt
+   (`"1925 Istanbul boarding-school"`, `"deep-space station, sabotage"`, etc.)
+2. The server generates a bilingual world via the OpenAI structured-output
+   schema. Genre is auto-detected; an opening atmosphere image renders in
+   parallel.
+3. **Players** join via the 6-character room code, pick TR or EN per seat,
+   and land in their assigned starting rooms.
+4. Each turn a player types an action; the narrator returns a structured
+   bilingual response with optional `MOVE` directives. Same-room players see
+   the action and the narrator's prose in their own locale.
+5. After 4–40 turns a player proposes an accusation. The team votes; the call
+   must be unanimous. Wrong = game over.
+6. The post-game shows a bilingual crime-scene reconstruction replay and lets
+   each player download a personalised case-file PDF.
 
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/chat/scenarios` | List all 6 available scenarios |
-| POST | `/api/chat/new` | Create a new session (returns sessionId) |
-| POST | `/api/chat/start` | Stream the opening narration |
-| POST | `/api/chat` | Send a message, stream narrator response |
-| GET | `/api/chat/session/:id` | Get session info + message history |
-| GET | `/api/chat/session/:id/gamestate` | Get current game state |
-| GET | `/api/chat/room/:code` | Resolve multiplayer room code |
-| POST | `/api/chat/image` | Generate or fetch a cached scene image |
-| POST | `/api/chat/accuse` | Submit a final accusation in single-player |
-| POST | `/api/chat/suggestions` | Get 3 follow-up action suggestions |
-
-## Available Scenarios
-
-| ID | Title | Setting |
-|---|---|---|
-| noir | The Velvet Shadow | 1920s rain-soaked Chicago |
-| haunted | The Hollow Manor | Gothic haunted manor on a stormy hilltop |
-| space | Station Zero | Deep-space research station |
-| pirate | The Crimson Tide | 18th-century pirate galleon |
-| western | Dust and Ashes | Wild West frontier town |
-| cyberpunk | Neon Ghosts | Rain-drenched cyberpunk megacity, 2087 |
-
-## Architecture
+## Architecture (high level)
 
 ```
-Browser ──► Next.js (3000) ──► Express + Socket.IO (3001) ──► OpenAI API
-                                     │
-                                     ├── Firestore session persistence
-                                     └── Firebase Auth token verification
+Browser ──WebSocket──► Express+Socket.IO server ──REST──► OpenAI API
+   │                            │                          (gpt-5.4 / mini / nano,
+   │                            │                           gpt-image-2,
+   │                            │                           gpt-4o-mini-tts)
+   │                            │
+   │                            ├──Firestore (sessions + openai_usage)
+   │                            │
+   └──Firebase Auth (optional, Google sign-in)
 ```
 
-- **SessionStore** now supports Firestore-backed persistence with restart recovery
-- **SSE streaming** powers the single-player narrator flow
-- **Socket.IO** powers multiplayer rooms, lobby state, and player-to-player sync
-- **Two AI models**: GPT-5.4 for narration, GPT-5-nano for suggestions
-
-## Deployment
-
-- **Frontend live URL:** `https://velvet-shadow.web.app`
-- **App Hosting backend URL:** `https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`
-- **Backend live URL:** `https://comp491-akboys-backend-539067187174.europe-west1.run.app`
-- **Cloud Run project:** `lodos-prod`
-- **Firebase / Firestore / Auth project:** `comp491-akboys-2026`
-- **Frontend deploy:** run `firebase deploy --only apphosting` inside [packages/web](/Users/batuhankaraman/comp491-akboys/packages/web)
-- **Public alias deploy:** run `firebase deploy --only hosting:velvet` inside [packages/web](/Users/batuhankaraman/comp491-akboys/packages/web)
-- **Backend deploy:** build with `cloudbuild.backend.yaml`, then deploy with [packages/server/Dockerfile](/Users/batuhankaraman/comp491-akboys/packages/server/Dockerfile)
-- **Persistence mode:** set `SESSION_STORE=firestore`
-- **Frontend API override:** set `NEXT_PUBLIC_SERVER_URL` to the deployed backend URL
-- **Production CORS:** set `CORS_ORIGIN` as a comma-separated allowlist (for example `https://velvet-shadow.web.app,https://akboys-web--comp491-akboys-2026.us-central1.hosted.app`)
+- Server-side TTS pre-warm renders both TR + EN narration in parallel the
+  moment world generation completes, so the curtain-open audio plays
+  instantly.
+- `lib/openai-retry.ts` retries once on `RateLimitError` /
+  `APIConnectionTimeoutError`; mid-stream errors surface as explicit SSE
+  `type:"error"` frames instead of silent truncation.
+- `lib/usage-logger.ts` fans every OpenAI call to stdout + JSONL +
+  Firestore, keyed by `sessionId + purpose + model`.
 
 ## Scripts
 
 | Command | Description |
 |---|---|
 | `npm run dev:local` | Start server + web concurrently |
-| `npm run build` | Build all packages |
-| `npm run clean` | Remove all build artifacts |
+| `npm run build` | Build all workspaces |
+| `npm run clean` | Remove build artifacts |
+| `npm run test:firestore -w packages/server` | Firestore session-store integration test |
+
+## Environment
+
+Copy `.env.example` to `.env` and fill in:
+
+```
+OPENAI_API_KEY=sk-...
+FIREBASE_PROJECT_ID=<your-firebase-project>   # optional, enables Firestore + Auth
+FIREBASE_AUTH_ENABLED=false                   # set true to require Google sign-in
+NEXT_PUBLIC_SERVER_URL=http://localhost:3001
+CORS_ORIGIN=http://localhost:3000             # comma-separated for prod
+SESSION_STORE=memory                          # or `firestore`
+```
+
+When `FIREBASE_PROJECT_ID` is unset, the server falls back to an in-memory
+session store and the usage dashboard reports `Firestore client başlatılamadı`.
+
+## Authors
+
+Kadir Yiğit Özçelik, Serdar Yengil, Batuhan Karaman, Ata Berke Göktekin.
+Advisor: Barış Akgün.
 
 ## License
 
-Private — COMP 491 course project.
+MIT — see [LICENSE](LICENSE).

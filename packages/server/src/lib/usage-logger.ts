@@ -51,18 +51,33 @@ interface PriceRow {
 }
 
 /**
- * Approximate USD per 1k tokens — updated 2026-05. We don't use these for
- * any guardrail, only the dashboard cost display. If a model isn't found
- * we attribute zero cost rather than guess.
+ * Approximate USD per 1k tokens — refreshed 2026-05-22 against OpenAI's
+ * public pricing page. Only used for dashboard cost display, never as
+ * a guardrail. Unknown models attribute zero rather than guess.
  */
 const RATES: Record<string, PriceRow> = {
-  'gpt-5.4': { inputPer1k: 0.005, outputPer1k: 0.020 },
+  // GPT-5.5 flagship — $5 / $30 per 1M
+  'gpt-5.5': { inputPer1k: 0.005, outputPer1k: 0.030 },
+  // GPT-5.4 family — $2.50 / $15 / $0.75 / $4.50 / $0.20 / $1.25 per 1M
+  'gpt-5.4': { inputPer1k: 0.0025, outputPer1k: 0.015 },
+  'gpt-5.4-mini': { inputPer1k: 0.00075, outputPer1k: 0.0045 },
+  'gpt-5.4-nano': { inputPer1k: 0.0002, outputPer1k: 0.00125 },
+  // Legacy — kept for back-compat with older deployed builds
   'gpt-5-nano': { inputPer1k: 0.0001, outputPer1k: 0.0004 },
+  // GPT-4.1-nano — cheapest text model overall, $0.10 / $0.40 per 1M
+  'gpt-4.1-nano': { inputPer1k: 0.0001, outputPer1k: 0.0004 },
+  // GPT-4o family (legacy)
   'gpt-4o': { inputPer1k: 0.005, outputPer1k: 0.015 },
   'gpt-4o-mini': { inputPer1k: 0.00015, outputPer1k: 0.0006 },
 };
 
-const IMAGE_COST_USD = 0.04;
+/**
+ * Image generation cost per call. Aligned to gpt-image-2 low-quality
+ * 1024x1024 (our request shape). Higher quality / larger sizes would
+ * scale up, but we lock the request to low/1024 so the flat estimate
+ * is correct.
+ */
+const IMAGE_COST_USD = 0.006;
 const TTS_COST_PER_1K_CHARS = 0.015;
 
 function estimateCostUsd(meta: UsageMeta): number {

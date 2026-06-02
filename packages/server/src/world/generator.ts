@@ -17,7 +17,11 @@ import { openaiClient } from '../lib/openai-client.js';
 import { withOpenAIRetry } from '../lib/openai-retry.js';
 import { logFromCompletion } from '../lib/usage-logger.js';
 
-const MODEL = 'gpt-5.4';
+// 2026-05-22 demo speed-up: switched flagship → mini. The structured
+// schema does most of the heavy lifting here, so the prose-quality cost
+// of mini-vs-flagship is small while the latency / token-cost saving is
+// ~50% (worldgen calls drop from ~85s to ~40s on the demo workload).
+const MODEL = 'gpt-5.4-mini';
 // Per OpenAI docs, gpt-5.4 defaults to 'none' reasoning. Lowest latency for
 // this extraction-style task. SDK type union doesn't include 'none' yet, so
 // we cast at the call site.
@@ -402,36 +406,26 @@ export async function generateWorld(
   const systemPrompt = buildSystemPrompt(clampedPC) + buildStyleAddition(genreTag);
   const userPrompt = buildUserPrompt(hostPrompt, clampedPC);
 
+  // 2026-05-22 demo speed-up: single-shot. Repair retry was eating ~80s on
+  // edge cases where the bilingual schema flagged tiny issues; mini is
+  // reliable enough that a single attempt + immediate hardcoded fallback is
+  // the better latency/quality trade for the live demo.
   let attempts = 0;
-
-  // Attempt 1 — fresh
   try {
     attempts += 1;
-    console.log(`${DEBUG} attempt 1: generating world for ${clampedPC} players, genre=${genreTag}, prompt=${hostPrompt.slice(0, 60)}`);
+    console.log(`${DEBUG} single-shot: generating world for ${clampedPC} players, genre=${genreTag}, prompt=${hostPrompt.slice(0, 60)}`);
     const world = await callOpenAIOnce(systemPrompt, userPrompt, sessionId);
     const validation = validateWorld(world, clampedPC);
     if (validation.valid) {
-      console.log(`${DEBUG} attempt 1: success`);
+      console.log(`${DEBUG} single-shot: success`);
       return { world, usedFallback: false, attempts, genreTag };
     }
-    console.warn(`${DEBUG} attempt 1 semantic errors:`, validation.errors);
-
-    // Attempt 2 — repair with feedback
-    attempts += 1;
-    const repairUserPrompt = `${userPrompt}\n\nYour previous attempt had these validation errors:\n${validation.errors.map((e) => `- ${e}`).join('\n')}\n\nFix them and return a corrected world. Keep everything else consistent.`;
-    console.log(`${DEBUG} attempt 2: repair with feedback`);
-    const repaired = await callOpenAIOnce(systemPrompt, repairUserPrompt, sessionId);
-    const validation2 = validateWorld(repaired, clampedPC);
-    if (validation2.valid) {
-      console.log(`${DEBUG} attempt 2: success`);
-      return { world: repaired, usedFallback: false, attempts, genreTag };
-    }
-    console.error(`${DEBUG} attempt 2 still has errors:`, validation2.errors);
+    console.warn(`${DEBUG} single-shot semantic errors (using fallback):`, validation.errors);
   } catch (err) {
     console.error(`${DEBUG} generation error:`, (err as Error).message);
   }
 
-  // Fallback
+  // Hardcoded Velvet Shadow fallback (no retry burns no extra tokens / time).
   console.warn(`${DEBUG} using hardcoded Velvet Shadow fallback`);
   return { world: getFallbackWorld(clampedPC), usedFallback: true, attempts, genreTag };
 }

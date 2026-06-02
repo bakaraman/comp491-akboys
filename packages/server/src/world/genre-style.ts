@@ -258,7 +258,7 @@ async function llmDetect(prompt: string): Promise<GenreTag> {
   const t0 = Date.now();
   try {
     const completion = await client().chat.completions.create({
-      model: 'gpt-5-nano',
+      model: 'gpt-5.4-nano',
       messages: [
         {
           role: 'system',

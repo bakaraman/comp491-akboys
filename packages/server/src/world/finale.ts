@@ -121,7 +121,10 @@ export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<
   const { system, user } = buildFinalePrompt(input);
   console.log(`${DEBUG} streaming finale: outcome=${input.outcome} locale=${input.locale}`);
 
-  const FINALE_MODEL = 'gpt-5.4';
+  // 2026-05-22 demo speed-up: flagship → mini, medium reasoning → low.
+  // Finale prose is 2 short paragraphs of plain noir Turkish/English —
+  // mini handles this cleanly and shaves ~10–15s off the user-visible wait.
+  const FINALE_MODEL = 'gpt-5.4-mini';
   const t0 = Date.now();
   const stream = await withOpenAIRetry('finale', () =>
     openaiStreamClient().chat.completions.create({
@@ -131,7 +134,7 @@ export async function* streamFinale(input: GenerateFinaleInput): AsyncGenerator<
         { role: 'user', content: user },
       ],
       max_completion_tokens: 1500, // leave room for reasoning tokens
-      reasoning_effort: 'medium',
+      reasoning_effort: 'low',
       stream: true,
       stream_options: { include_usage: true },
     }),
@@ -249,7 +252,11 @@ ${enPrompt.user}
 
 Now produce the bilingual JSON now.`;
 
-  const FINALE_MODEL = 'gpt-5.4';
+  // 2026-05-22 demo speed-up: flagship → mini, medium reasoning → low.
+  // Bilingual JSON output is ~1.5k chars of plain prose; mini renders it
+  // cleanly and the user-visible wait between accusation and finale drops
+  // from ~20–30s to ~8–12s. Cached per-session so this only fires once.
+  const FINALE_MODEL = 'gpt-5.4-mini';
   console.log(`${DEBUG} bilingual generation start: outcome=${input.outcome}`);
   const t0 = Date.now();
 
@@ -261,7 +268,7 @@ Now produce the bilingual JSON now.`;
         { role: 'user', content: user },
       ],
       max_completion_tokens: 3000,
-      reasoning_effort: 'medium',
+      reasoning_effort: 'low',
       response_format: { type: 'json_object' },
     }),
   );

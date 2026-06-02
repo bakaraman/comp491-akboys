@@ -40,6 +40,7 @@ import {
   type FinaleOutcome,
 } from '../world/index.js';
 import { renderCaseFilePdf } from '../pdf/render.js';
+import { tryGetCached as tryGetCachedTts } from '../lib/tts-cache.js';
 
 export const chatRouter = Router();
 
@@ -600,6 +601,23 @@ chatRouter.post('/tts', requireAuth, async (req: Request, res: Response) => {
     }
     const sessionIdHeader = (req.body as { sessionId?: string })?.sessionId;
     const locale: 'tr' | 'en' = localeRaw === 'en' ? 'en' : 'tr';
+
+    // 2026-05-22 demo speed-up: opening narration TTS is pre-warmed on the
+    // server (see socket/handlers.ts story:ready). If this request matches
+    // the cached opening text for this session+locale we skip the OpenAI
+    // round-trip entirely (3–5s → ~0ms).
+    if (sessionIdHeader) {
+      const hit = tryGetCachedTts(sessionIdHeader, locale, text);
+      if (hit) {
+        console.log(`[tts] cache hit ${sessionIdHeader.slice(0, 8)}/${locale} (${hit.buffer.length}B, original render=${hit.renderMs}ms)`);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Length', String(hit.buffer.length));
+        res.end(hit.buffer);
+        return;
+      }
+    }
+
     const ttsRes = await streamTts({
       text,
       locale,
